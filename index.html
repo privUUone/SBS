@@ -1,118 +1,227 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8"><title>SmartShot AI Pro</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartShot AI</title>
     <style>
-        body { background: #121212; color: #fff; font-family: sans-serif; text-align: center; margin: 0; }
-        .ui { background: #1e1e1e; padding: 15px; display: flex; gap: 15px; justify-content: center; align-items: center; border-bottom: 1px solid #333; }
-        canvas { max-width: 95vw; border: 2px solid #444; margin-top: 15px; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
-        .score-overlay { position: absolute; top: 80px; left: 20px; background: rgba(0,0,0,0.85); padding: 15px; border-radius: 8px; border: 1px solid #007acc; text-align: left; min-width: 120px; }
-        #status { color: #007acc; font-weight: bold; }
-        input[type="number"] { width: 45px; background: #333; color: #fff; border: 1px solid #555; padding: 5px; }
+        :root { --bg: #121212; --panel: #1e1e1e; --text: #e0e0e0; --accent: #00ffcc; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        h1 { color: var(--accent); }
+        .controls { background-color: var(--panel); padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .canvas-container { position: relative; display: inline-block; }
+        canvas { max-width: 100%; border: 1px solid #333; border-radius: 4px; }
+        #scorePanel { position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.7); padding: 15px; border-radius: 8px; border: 1px solid var(--accent); display: none; }
+        .score-value { font-size: 24px; font-weight: bold; color: var(--accent); }
+        #status { margin-bottom: 15px; font-weight: bold; color: #ffeb3b; }
+        input[type="file"] { color: var(--text); }
     </style>
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 </head>
 <body>
-    <div class="ui">
-        <div id="status">Lade KI...</div>
-        <input type="file" id="u-img" accept="image/*">
-        <label>Ringe: <input type="number" id="u-r" value="10"></label>
-        <button id="u-btn" style="background:#007acc; color:white; border:none; padding:8px 15px; cursor:pointer;" disabled>Analyse</button>
+
+    <h1>🎯 SmartShot AI</h1>
+    <div id="status">Lade OpenCV.js... Bitte warten.</div>
+
+    <div class="controls">
+        <input type="file" id="imageInput" accept="image/*" disabled>
+        <button id="processBtn" disabled>Schussbild auswerten</button>
     </div>
-    <div style="position:relative; display: inline-block;">
-        <canvas id="canvas"></canvas>
-        <div id="score-card" class="score-overlay" style="display:none">
-            <div style="font-size:1.2em; color:#4CAF50">Punkte: <span id="s-tot">0</span></div>
-            <div style="font-size:0.9em; color:#aaa">Treffer: <span id="s-hit">0</span></div>
+
+    <div class="canvas-container">
+        <canvas id="canvasOutput"></canvas>
+        <div id="scorePanel">
+            <div>Gesamt-Score: <span id="totalScore" class="score-value">0</span></div>
+            <div>Erkannte Treffer: <span id="hitCount">0</span></div>
         </div>
     </div>
 
-    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="cvRdy()"></script>
-    <script>
-        const $ = id => document.getElementById(id);
-        let img = new Image();
-        function cvRdy() { $('status').innerText='Bereit'; $('u-btn').disabled=0; }
-        $('u-img').onchange = e => img.src = URL.createObjectURL(e.target.files[0]);
+<script>
+    let cvReady = false;
 
-        $('u-btn').onclick = () => {
-            let src = cv.imread(img), gray = new cv.Mat(), bw = new cv.Mat();
-            
-            // 1. MAX CONTRAST (Handy-App Effekt)
-            // Wir skalieren die Helligkeit/Kontrast massiv hoch (Alpha 1.5, Beta -50)
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-            cv.convertScaleAbs(gray, gray, 1.6, -40); 
-            cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
-            
-            // Aggressiver Threshold für klare Kanten
-            cv.adaptiveThreshold(gray, bw, 255, 1, 1, 35, 2);
+    function onOpenCvReady() {
+        cvReady = true;
+        document.getElementById('status').innerText = 'OpenCV.js ist bereit! Lade ein Bild hoch.';
+        document.getElementById('status').style.color = '#00ffcc';
+        document.getElementById('imageInput').disabled = false;
+    }
 
-            // 2. WARP LOGIK (Stabilisiert)
-            let cnts = new cv.MatVector(), hier = new cv.Mat();
-            cv.findContours(bw, cnts, hier, 0, 2);
-            let maxA=0, maxI=-1;
-            for(let i=0; i<cnts.size(); i++) {
-                let a = cv.contourArea(cnts.get(i));
-                if(a > maxA) { maxA=a; maxI=i; }
+    const imgInput = document.getElementById('imageInput');
+    const processBtn = document.getElementById('processBtn');
+    let imgElement = new Image();
+
+    imgInput.addEventListener('change', (e) => {
+        imgElement.src = URL.createObjectURL(e.target.files[0]);
+        imgElement.onload = () => {
+            processBtn.disabled = false;
+            // Bild initial auf Canvas zeichnen
+            let canvas = document.getElementById('canvasOutput');
+            let ctx = canvas.getContext('2d');
+            canvas.width = imgElement.width;
+            canvas.height = imgElement.height;
+            ctx.drawImage(imgElement, 0, 0);
+        }
+    });
+
+    processBtn.addEventListener('click', () => {
+        if (!cvReady) return;
+        processTarget();
+    });
+
+    function processTarget() {
+        let src = cv.imread(imgElement);
+        let gray = new cv.Mat();
+        
+        // 1. Globaler Kontrast-Boost
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+        let enhanced = new cv.Mat();
+        // Spreizung des Histogramms (Simulation "100% Kontrast")
+        gray.convertTo(enhanced, -1, 1.5, -50); 
+
+        // 2. High-Contrast Binarisierung
+        let binary = new cv.Mat();
+        cv.adaptiveThreshold(enhanced, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 15, 5);
+
+        // 3. Target Detection & Perspective Warp
+        let contours = new cv.MatVector();
+        let hierarchy = new cv.Mat();
+        cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+        let maxArea = 0;
+        let largestContourIndex = -1;
+        for (let i = 0; i < contours.size(); ++i) {
+            let area = cv.contourArea(contours.get(i));
+            if (area > maxArea) {
+                maxArea = area;
+                largestContourIndex = i;
             }
-            if(maxI < 0) return alert("Scheibe nicht erkannt");
+        }
 
-            let rot = cv.minAreaRect(cnts.get(maxI)), pts = cv.RotatedRect.points(rot);
-            // Ecken sortieren (Top-Left, Top-Right, Bottom-Right, Bottom-Left)
-            pts.sort((a,b) => a.y - b.y);
-            let tl = pts[0].x < pts[1].x ? pts[0] : pts[1], tr = pts[0].x < pts[1].x ? pts[1] : pts[0];
-            let bl = pts[2].x < pts[3].x ? pts[2] : pts[3], br = pts[2].x < pts[3].x ? pts[3] : pts[2];
+        if (largestContourIndex === -1) {
+            alert("Zielscheibe nicht gefunden!");
+            return;
+        }
 
-            let sz = 1000, out = new cv.Mat(), mG = new cv.Mat(), mB = new cv.Mat();
-            let sT = cv.matFromArray(4, 1, cv.CV_32FC2, [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]);
-            let dT = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, sz, 0, sz, sz, 0, sz]);
-            let M_w = cv.getPerspectiveTransform(sT, dT);
+        // minAreaRect zur Eckpunktbestimmung
+        let targetContour = contours.get(largestContourIndex);
+        let rotatedRect = cv.minAreaRect(targetContour);
+        let vertices = cv.RotatedRect.points(rotatedRect);
+        
+        // Ecken sortieren (Top-Left, Top-Right, Bottom-Right, Bottom-Left)
+        // (Vereinfachte Logik für das PoC)
+        vertices.sort((a, b) => a.y - b.y);
+        let top = vertices.slice(0, 2).sort((a, b) => a.x - b.x);
+        let bottom = vertices.slice(2, 4).sort((a, b) => b.x - a.x);
+        let orderedVertices = [...top, ...bottom];
+
+        let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+            orderedVertices[0].x, orderedVertices[0].y,
+            orderedVertices[1].x, orderedVertices[1].y,
+            orderedVertices[2].x, orderedVertices[2].y,
+            orderedVertices[3].x, orderedVertices[3].y
+        ]);
+
+        // Ziel-Quadrat erstellen (z.B. 800x800)
+        const WARP_SIZE = 800;
+        let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+            0, 0,
+            WARP_SIZE, 0,
+            WARP_SIZE, WARP_SIZE,
+            0, WARP_SIZE
+        ]);
+
+        let M = cv.getPerspectiveTransform(srcTri, dstTri);
+        let warped = new cv.Mat();
+        let warpedColor = new cv.Mat();
+        let dsize = new cv.Size(WARP_SIZE, WARP_SIZE);
+        
+        // Warp auf Binärbild und Farbbild anwenden
+        cv.warpPerspective(binary, warped, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+        cv.warpPerspective(src, warpedColor, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+
+        // 4. Symmetrie-basierte Klassifizierung (Zahlen vs. Treffer)
+        let warpedContours = new cv.MatVector();
+        let warpedHierarchy = new cv.Mat();
+        cv.findContours(warped, warpedContours, warpedHierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+        const center = { x: WARP_SIZE / 2, y: WARP_SIZE / 2 };
+        let hits = [];
+        let numbers = [];
+        let suspiciousPoints = [];
+
+        // Schwerpunkt-Berechnung und Vorfilterung (Fläche)
+        for (let i = 0; i < warpedContours.size(); ++i) {
+            let cnt = warpedContours.get(i);
+            let area = cv.contourArea(cnt);
             
-            cv.warpPerspective(src, out, M_w, new cv.Size(sz, sz));
-            cv.warpPerspective(gray, mG, M_w, new cv.Size(sz, sz));
-            // Zweiten Threshold auf dem planen Bild
-            cv.adaptiveThreshold(mG, mB, 255, 1, 1, 21, 5);
+            if (area > 20 && area < 2000) { // Rauschen und riesige Ringe ignorieren
+                let M_cnt = cv.moments(cnt, false);
+                let cx = M_cnt.m10 / M_cnt.m00;
+                let cy = M_cnt.m01 / M_cnt.m00;
+                suspiciousPoints.push({ x: cx, y: cy, area: area, cnt: cnt });
+            }
+        }
 
-            // 3. RADIALE ANALYSE (Zentrum-fokussiert)
-            let wCnt = new cv.MatVector(), sc=0, ht=0, rings=parseInt($('u-r').value);
-            let mid = sz/2, maxR = sz/2, rW = maxR / rings;
-            cv.findContours(mB, wCnt, hier, 1, 2);
+        const EPSILON_DIST = 35; // Pixel-Toleranz für Symmetrie-Prüfung
+
+        suspiciousPoints.forEach(p1 => {
+            let isSymmetric = false;
             
-            for(let i=0; i<wCnt.size(); i++){
-                let c = wCnt.get(i), a = cv.contourArea(c), p = cv.arcLength(c, true);
-                if(a < 30 || a > (sz*sz*0.4)) continue; // Ignoriere Rauschen & die ganze Scheibe
+            // Punktspiegelung am Mittelpunkt
+            let expectedX = 2 * center.x - p1.x;
+            let expectedY = 2 * center.y - p1.y;
 
-                let m = cv.moments(c), cx = m.m10/m.m00, cy = m.m01/m.m00;
-                let d = Math.hypot(cx-mid, cy-mid);
-                if(d > maxR * 0.98) continue; // Ignoriere Dinge am alleräußersten Rand
-
-                // FORM-CHECK: Circularity = 4*PI*Area / Perimeter^2
-                let circ = (4 * Math.PI * a) / (p * p);
-
-                // LOGIK:
-                // 1. Wenn es fast ein perfekter Kreis ist UND sehr groß -> Wahrscheinlich ein Ring-Rand
-                if(circ > 0.85 && a > 1000) continue; 
-
-                // 2. ZAHLEN-FILTER: Zahlen liegen oft auf einem Radius, der genau zwischen den Ringen ist.
-                // Und sie sind meistens "unrund" (circ < 0.5)
-                let onRingLine = Math.abs((d % rW)) < (rW * 0.15); // Nah an einer Ring-Linie?
+            // Prüfen, ob ein anderer Punkt in der Nähe der erwarteten symmetrischen Position existiert
+            for (let p2 of suspiciousPoints) {
+                if (p1 === p2) continue;
+                let distToExpected = Math.hypot(p2.x - expectedX, p2.y - expectedY);
                 
-                if(onRingLine && circ < 0.6) {
-                    cv.drawContours(out, wCnt, i, [255,255,0,255], 2); // Gelb = Zahl/Ignoriert
-                } else {
-                    // 3. EINSCHUSSLOCH: Alles andere im Zielbereich
-                    cv.drawContours(out, wCnt, i, [255,0,0,255], -1); // Rot = Treffer
-                    cv.drawContours(out, wCnt, i, [255,255,255,255], 2);
-                    sc += Math.max(0, rings - Math.floor(d/rW));
-                    ht++;
+                if (distToExpected < EPSILON_DIST) {
+                    isSymmetric = true;
+                    break;
                 }
             }
-            
-            // Ringe zur Kontrolle (Blau)
-            for(let r=1; r<=rings; r++) cv.circle(out, new cv.Point(mid,mid), rW*r, [0,150,255,255], 1);
-            
-            cv.imshow('canvas', out);
-            $('s-tot').innerText=sc; $('s-hit').innerText=ht; $('score-card').style.display='block';
-            [src,gray,bw,cnts,hier,out,mG,mB,sT,dT,M_w,wCnt].forEach(m => m.delete());
-        };
-    </script>
+
+            if (isSymmetric) {
+                numbers.push(p1);
+                // Gelb: Ignorierte Zahlen
+                cv.circle(warpedColor, new cv.Point(p1.x, p1.y), 15, new cv.Scalar(255, 255, 0, 255), 2);
+            } else {
+                hits.push(p1);
+                // Rot: Validierte Treffer
+                cv.circle(warpedColor, new cv.Point(p1.x, p1.y), 10, new cv.Scalar(255, 0, 0, 255), -1);
+            }
+        });
+
+        // 5. Dynamisches Scoring
+        let totalScore = 0;
+        const maxRadius = WARP_SIZE / 2;
+        
+        // Blau: Rekonstruierte Ringe zeichnen (Visualisierung)
+        for(let r = 1; r <= 10; r++) {
+            cv.circle(warpedColor, new cv.Point(center.x, center.y), (maxRadius / 10) * r, new cv.Scalar(0, 200, 255, 255), 1);
+        }
+
+        hits.forEach(hit => {
+            let distToCenter = Math.hypot(hit.x - center.x, hit.y - center.y);
+            // Je näher am Zentrum, desto höher der Score (Max = 10)
+            let score = 11 - Math.ceil((distToCenter / maxRadius) * 10);
+            if(score < 0) score = 0;
+            if(score > 10) score = 10;
+            totalScore += score;
+        });
+
+        // Output anzeigen
+        cv.imshow('canvasOutput', warpedColor);
+        document.getElementById('scorePanel').style.display = 'block';
+        document.getElementById('totalScore').innerText = totalScore;
+        document.getElementById('hitCount').innerText = hits.length;
+
+        // Speicher freigeben
+        src.delete(); gray.delete(); enhanced.delete(); binary.delete(); contours.delete(); hierarchy.delete();
+        warped.delete(); warpedColor.delete(); warpedContours.delete(); warpedHierarchy.delete(); M.delete();
+    }
+</script>
 </body>
 </html>
+
