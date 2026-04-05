@@ -3,138 +3,149 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Schussbild Auswertung</title>
+    <title>Schussbild Auswertung Pro</title>
     <style>
         :root {
-            --primary: #2563eb;
-            --primary-hover: #1d4ed8;
-            --bg: #f8fafc;
-            --surface: #ffffff;
-            --text: #0f172a;
-            --text-light: #64748b;
-            --border: #e2e8f0;
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --text: #f1f5f9;
+            --text-dim: #94a3b8;
+            --border: #334155;
+            --success: #22c55e;
+            --error: #ef4444;
         }
 
         body { 
-            font-family: system-ui, -apple-system, sans-serif; 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
             padding: 2rem 1rem; 
             background-color: var(--bg); 
             color: var(--text); 
-            line-height: 1.5;
             margin: 0;
+            display: flex;
+            justify-content: center;
         }
 
         .container { 
+            width: 100%;
             max-width: 800px; 
-            margin: auto; 
             background: var(--surface); 
             padding: 2rem; 
-            border-radius: 12px; 
-            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.01); 
+            border-radius: 16px; 
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);
+            border: 1px solid var(--border);
         }
 
-        h1 { margin-top: 0; font-size: 1.75rem; color: var(--text); }
+        h1 { margin: 0 0 1.5rem 0; font-size: 1.5rem; text-align: center; letter-spacing: -0.025em; }
         
         .status-box {
             padding: 1rem;
-            border-radius: 8px;
-            background: #fef2f2;
-            color: #991b1b;
+            border-radius: 12px;
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error);
             margin-bottom: 1.5rem;
             font-weight: 500;
             display: flex;
             align-items: center;
-            gap: 10px;
+            justify-content: center;
+            gap: 12px;
+            border: 1px solid rgba(239, 68, 68, 0.2);
         }
-        .status-box.ready { background: #f0fdf4; color: #166534; }
+        .status-box.ready { 
+            background: rgba(34, 197, 94, 0.1); 
+            color: var(--success); 
+            border-color: rgba(34, 197, 94, 0.2);
+        }
 
         .controls { 
             display: grid; 
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem; 
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem; 
             padding: 1.5rem; 
-            background: var(--bg); 
-            border: 1px solid var(--border);
-            border-radius: 8px; 
-            margin-bottom: 1.5rem;
+            background: rgba(15, 23, 42, 0.5); 
+            border-radius: 12px; 
+            margin-bottom: 2rem;
         }
 
         .control-group { display: flex; flex-direction: column; gap: 0.5rem; }
+        label { font-size: 0.75rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; }
         
-        label { font-size: 0.875rem; font-weight: 600; color: var(--text-light); }
-        
-        input[type="file"] { font-size: 0.875rem; }
+        input[type="file"] { font-size: 0.875rem; color: var(--text-dim); }
         
         input[type="number"] { 
-            padding: 0.5rem; 
+            padding: 0.6rem; 
+            background: var(--bg);
             border: 1px solid var(--border); 
-            border-radius: 6px; 
-            width: 100%;
-            box-sizing: border-box;
+            border-radius: 8px; 
+            color: white;
+            outline: none;
         }
 
         button { 
-            padding: 0.75rem 1.5rem; 
-            font-weight: 600;
+            grid-column: span 2;
+            padding: 1rem; 
+            font-weight: 700;
             background-color: var(--primary); 
             color: white; 
             border: none; 
-            border-radius: 6px; 
+            border-radius: 8px; 
             cursor: pointer; 
-            transition: background-color 0.2s;
-            grid-column: 1 / -1; /* Button streckt sich über volle Breite */
+            transition: all 0.2s;
+            font-size: 1rem;
         }
-        button:hover:not(:disabled) { background-color: var(--primary-hover); }
-        button:disabled { background-color: #cbd5e1; cursor: not-allowed; opacity: 0.7; }
+        button:hover:not(:disabled) { background-color: var(--primary-hover); transform: translateY(-1px); }
+        button:active { transform: translateY(0); }
+        button:disabled { background-color: var(--border); color: var(--text-dim); cursor: not-allowed; }
 
         .canvas-container {
-            border: 2px dashed var(--border);
-            border-radius: 8px;
-            padding: 0.5rem;
-            background: #fff;
-            text-align: center;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        canvas { 
-            max-width: 100%; 
-            height: auto; 
-            display: block; 
-            margin: 0 auto;
-            border-radius: 4px;
-        }
+        canvas { max-width: 100%; height: auto; }
 
-        /* Simpler Lade-Spinner */
         .spinner {
-            width: 16px; height: 16px;
-            border: 2px solid currentColor;
+            width: 18px; height: 18px;
+            border: 3px solid currentColor;
             border-bottom-color: transparent;
             border-radius: 50%;
-            display: inline-block;
             animation: rotation 1s linear infinite;
         }
         @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        @media (max-width: 500px) {
+            .controls { grid-template-columns: 1fr; }
+            button { grid-column: span 1; }
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🎯 Schussbild Auswertung</h1>
+    <h1>🎯 Schuss-Analyse <span style="color:var(--primary)">Pro</span></h1>
     
     <div id="statusBox" class="status-box">
-        <span id="spinner" class="spinner"></span>
-        <span id="statusText">OpenCV.js wird geladen... Dieser Vorgang kann einige Sekunden dauern.</span>
+        <div id="spinner" class="spinner"></div>
+        <span id="statusText">Lade Bildverarbeitungs-Modul...</span>
     </div>
     
     <div class="controls">
         <div class="control-group">
-            <label for="imageInput">Schussbild hochladen</label>
+            <label>Bildquelle</label>
             <input type="file" id="imageInput" accept="image/*" disabled>
         </div>
         <div class="control-group">
-            <label for="rings">Anzahl der Ringe (z.B. 5)</label>
+            <label>Ringe (Soll)</label>
             <input type="number" id="rings" value="5" min="1" max="10" disabled>
         </div>
-        <button id="scanButton" disabled>Scannen & Auswerten</button>
+        <button id="scanButton" disabled>ANALYSE STARTEN</button>
     </div>
 
     <div class="canvas-container">
@@ -142,95 +153,179 @@
     </div>
 </div>
 
-<script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+<script async src="https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0-release.3/dist/opencv.js" id="opencv-script"></script>
 
 <script type="text/javascript">
-    let imgElement = document.getElementById('imageInput');
-    let scanButton = document.getElementById('scanButton');
-    let outputCanvas = document.getElementById('outputCanvas');
-    let statusBox = document.getElementById('statusBox');
-    let statusText = document.getElementById('statusText');
-    let spinner = document.getElementById('spinner');
+    const imgInput = document.getElementById('imageInput');
+    const scanBtn = document.getElementById('scanButton');
+    const canvas = document.getElementById('outputCanvas');
+    const statusBox = document.getElementById('statusBox');
+    const statusText = document.getElementById('statusText');
+    const spinner = document.getElementById('spinner');
+
+    // Falls das Script nach 10 Sek nicht lädt, Fehlermeldung zeigen
+    const loadTimeout = setTimeout(() => {
+        if (typeof cv === 'undefined') {
+            statusText.innerText = "Ladefehler: Bitte Seite neu laden oder Internet prüfen.";
+        }
+    }, 10000);
 
     function onOpenCvReady() {
+        clearTimeout(loadTimeout);
         statusBox.className = 'status-box ready';
         spinner.style.display = 'none';
-        statusText.innerText = 'System bereit! Lade ein Bild hoch und starte den Scan.';
-        imgElement.disabled = false;
+        statusText.innerText = 'System bereit für Scan';
+        imgInput.disabled = false;
         document.getElementById('rings').disabled = false;
     }
 
-    imgElement.addEventListener('change', (e) => {
-        let file = e.target.files[0];
+    // OpenCV.js nutzt einen speziellen Hook
+    if (typeof cv !== 'undefined') {
+        onOpenCvReady();
+    } else {
+        document.getElementById('opencv-script').onload = onOpenCvReady;
+    }
+
+    imgInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
         if (!file) return;
-        let reader = new FileReader();
-        reader.onload = function(event) {
-            let img = new Image();
-            img.onload = function() {
-                let ctx = outputCanvas.getContext('2d');
-                // Canvas Größe ans Bild anpassen für bessere Auflösung
-                outputCanvas.width = img.width;
-                outputCanvas.height = img.height;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const img = new Image();
+            img.onload = () => {
+                const ctx = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
                 ctx.drawImage(img, 0, 0);
-                scanButton.disabled = false;
+                scanBtn.disabled = false;
             }
             img.src = event.target.result;
         };
         reader.readAsDataURL(file);
     });
 
-    scanButton.addEventListener('click', () => {
-        // Kurze Verzögerung, damit der Button-Klick visuell spürbar ist
-        scanButton.innerText = "Wertet aus...";
-        scanButton.disabled = true;
-        setTimeout(() => {
-            processImage();
-            scanButton.innerText = "Scannen & Auswerten";
-            scanButton.disabled = false;
-        }, 50);
+    scanBtn.addEventListener('click', () => {
+        scanBtn.innerText = "VERARBEITE...";
+        scanBtn.disabled = true;
+        // Kurzes Timeout für UI-Update
+        setTimeout(processImage, 100);
     });
 
     function processImage() {
-        let src = cv.imread(outputCanvas);
+        let src = cv.imread(canvas);
         let gray = new cv.Mat();
         let bw = new cv.Mat();
         let contours = new cv.MatVector();
         let hierarchy = new cv.Mat();
 
-        // WICHTIG: Try-Finally Block, damit der Speicher bei Fehlern IMMER geleert wird!
         try {
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
             cv.adaptiveThreshold(gray, bw, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
             cv.findContours(bw, contours, hierarchy, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE);
 
             let targetCenter = { x: 0, y: 0 };
             let maxRadius = 0;
-            let mainCircleIdx = -1;
+            let mainIdx = -1;
 
-            // 1. Äußersten Ring finden
+            // 1. Suche Hauptkreis
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
-                
-                if (area > 1000) {
+                if (area > 1500) {
                     let circle = cv.minEnclosingCircle(cnt);
-                    let circleArea = Math.PI * circle.radius * circle.radius;
-                    
-                    if (circleArea > 0 && (area / circleArea > 0.75)) { 
-                        if (circle.radius > maxRadius) {
-                            maxRadius = circle.radius;
-                            targetCenter = circle.center;
-                            mainCircleIdx = i;
+                    let cArea = Math.PI * circle.radius * circle.radius;
+                    if (area / cArea > 0.7 && circle.radius > maxRadius) {
+                        maxRadius = circle.radius;
+                        targetCenter = circle.center;
+                        mainIdx = i;
+                    }
+                }
+                cnt.delete();
+            }
+
+            if (mainIdx === -1) {
+                alert("Zielscheibe nicht erkannt!");
+                return;
+            }
+
+            const numRings = parseInt(document.getElementById('rings').value) || 5;
+            const rWidth = maxRadius / numRings;
+
+            // Ringe zeichnen
+            for (let j = 1; j <= numRings; j++) {
+                cv.circle(src, targetCenter, j * rWidth, [59, 130, 246, 255], 2);
+            }
+
+            let numGroups = [];
+            let holes = [];
+
+            // 2. Scan Objekte
+            for (let i = 0; i < contours.size(); ++i) {
+                if (i === mainIdx) continue;
+                let cnt = contours.get(i);
+                let area = cv.contourArea(cnt);
+
+                if (area > 20 && area < (maxRadius * maxRadius)) {
+                    let M = cv.moments(cnt);
+                    if (M.m00 !== 0) {
+                        let cX = M.m10 / M.m00;
+                        let cY = M.m01 / M.m00;
+                        let d = Math.sqrt((cX-targetCenter.x)**2 + (cY-targetCenter.y)**2);
+
+                        if (d <= maxRadius) {
+                            let tol = maxRadius * 0.07;
+                            let onAxis = Math.abs(cY - targetCenter.y) < tol || Math.abs(cX - targetCenter.x) < tol;
+
+                            if (onAxis) {
+                                let rIdx = Math.round(d / rWidth);
+                                if (!numGroups[rIdx]) numGroups[rIdx] = [];
+                                numGroups[rIdx].push({x: cX, y: cY, a: area});
+                            } else {
+                                holes.push({x: cX, y: cY, d: d});
+                            }
                         }
                     }
                 }
-                cnt.delete(); // <-- HIER WAR DER MEMORY LEAK!
+                cnt.delete();
             }
 
-            if (mainCircleIdx === -1) {
-                alert("Zielscheibe konnte nicht gefunden werden. Bitte Kontrast prüfen.");
-                return; // Geht dank 'finally' ohne Memory Leak raus
-            }
+            // 3. Loch-in-Zahl Check
+            numGroups.forEach(g => {
+                if (g && g.length > 1) {
+                    let avg = g.reduce((s, v) => s + v.a, 0) / g.length;
+                    g.forEach(n => {
+                        if (n.a > avg * 1.5) holes.push({x: n.x, y: n.y, d: Math.sqrt((n.x-targetCenter.x)**2 + (n.y-targetCenter.y)**2)});
+                    });
+                }
+            });
 
-            let numRings = parseInt(document.getElementById('rings').value) || 5;
+            // 4. Score & Markierung
+            let total = 0;
+            holes.forEach(h => {
+                let rHit = Math.floor(h.d / rWidth);
+                let val = Math.max(0, Math.min(10, (10 - numRings + 1) + (numRings - 1 - rHit)));
+                total += val;
+                cv.circle(src, {x: h.x, y: h.y}, 10, [239, 68, 68, 255], 3);
+                cv.putText(src, val.toString(), {x: h.x + 15, y: h.y}, cv.FONT_HERSHEY_SIMPLEX, 0.8, [239, 68, 68, 255], 2);
+            });
+
+            // Score-Overlay
+            cv.rectangle(src, {x: 10, y: 10}, {x: 280, y: 80}, [30, 41, 59, 230], -1);
+            cv.putText(src, `SCORE: ${total}`, {x: 30, y: 55}, cv.FONT_HERSHEY_SIMPLEX, 1.4, [34, 197, 94, 255], 3);
+
+            cv.imshow('outputCanvas', src);
+
+        } catch(e) {
+            console.error(e);
+            alert("Fehler bei der Analyse.");
+        } finally {
+            src.delete(); gray.delete(); bw.delete(); contours.delete(); hierarchy.delete();
+            scanBtn.innerText = "ANALYSE STARTEN";
+            scanBtn.disabled = false;
+        }
+    }
+</script>
+
+</body>
+</html>
 
