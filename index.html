@@ -3,21 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TargetScan V21 - Manual Tuning</title>
+    <title>TargetScan V22 - Debug Edition</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
     <style>
         body { font-family: sans-serif; background: #111; color: white; padding: 10px; display: flex; flex-direction: column; align-items: center; }
         #app-container { width: 100%; max-width: 500px; }
-        .card { background: #222; padding: 12px; border-radius: 12px; margin-bottom: 8px; border: 1px solid #444; }
-        video, canvas { width: 100%; border-radius: 10px; background: #000; }
-        #output-canvas { display: none; }
+        .card { background: #222; padding: 12px; border-radius: 12px; margin-bottom: 8px; border: 1px solid #444; width: 100%; box-sizing: border-box;}
+        video, canvas { width: 100%; border-radius: 10px; background: #000; margin-top: 5px; }
+        .hidden { display: none; }
         button { width: 100%; padding: 15px; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; border: none; margin-top: 5px; }
         #scan-btn { background: #4caf50; color: white; }
-        .input-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.85em; }
+        .input-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.8em; }
         .input-group { display: flex; flex-direction: column; }
-        input { background: #333; color: white; border: 1px solid #555; padding: 4px; border-radius: 4px; margin-top: 2px; }
+        input { background: #333; color: white; border: 1px solid #555; padding: 4px; border-radius: 4px; }
         #status { text-align: center; color: #ffeb3b; margin: 8px 0; font-weight: bold; font-size: 0.9em; }
-        .res { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #333; }
+        h4 { margin: 10px 0 5px 0; font-size: 0.9em; color: #aaa; text-transform: uppercase; }
     </style>
 </head>
 <body>
@@ -25,41 +25,29 @@
     <div id="app-container">
         <div class="card">
             <div class="input-grid">
-                <div class="input-group">
-                    <label>Ringe (z.B. 5):</label>
-                    <input type="number" id="ring-count" value="5">
-                </div>
-                <div class="input-group">
-                    <label>Hauptfarben:</label>
-                    <input type="number" id="color-count" value="2">
-                </div>
-                <div class="input-group">
-                    <label>Ignorier-Stufen:</label>
-                    <input type="number" id="color-range" value="15">
-                </div>
-                <div class="input-group">
-                    <label>Loch-Stufen:</label>
-                    <input type="number" id="hole-range" value="12">
-                </div>
-                <div class="input-group">
-                    <label>Mindest-Fläche %:</label>
-                    <input type="number" id="min-area-pct" step="0.05" value="0.2">
-                </div>
-                <div class="input-group">
-                    <label>Empfindlichkeit %:</label>
-                    <input type="number" id="sensitivity" step="0.05" value="0.3">
-                </div>
+                <div class="input-group"><label>Ringe (z.B. 5):</label><input type="number" id="ring-count" value="5"></div>
+                <div class="input-group"><label>Hauptfarben:</label><input type="number" id="color-count" value="2"></div>
+                <div class="input-group"><label>Ignorier-Stufen:</label><input type="number" id="color-range" value="25"></div>
+                <div class="input-group"><label>Loch-Stufen:</label><input type="number" id="hole-range" value="15"></div>
+                <div class="input-group"><label>Mindest-Fläche %:</label><input type="number" id="min-area-pct" step="0.05" value="0.15"></div>
+                <div class="input-group"><label>Empfindlichkeit %:</label><input type="number" id="sensitivity" step="0.05" value="0.2"></div>
             </div>
             <div id="status">Warte auf OpenCV...</div>
         </div>
 
+        <h4>Kamera / Ergebnis</h4>
         <video id="camera-view" autoplay playsinline></video>
-        <canvas id="output-canvas"></canvas>
+        <canvas id="output-canvas" class="hidden"></canvas>
+        
+        <div id="debug-area" class="hidden">
+            <h4>Analyse-Maske (Was der PC sieht)</h4>
+            <canvas id="debug-canvas"></canvas>
+        </div>
         
         <button id="scan-btn" disabled>Scan starten</button>
-        <button id="reset-btn" style="display:none; background:#2196f3; color:white;">Neuer Scan</button>
+        <button id="reset-btn" class="hidden" style="background:#2196f3; color:white;">Neuer Scan</button>
 
-        <div id="result-panel" class="card" style="display:none;">
+        <div id="result-panel" class="card hidden" style="margin-top:10px;">
             <div id="results-list"></div>
         </div>
     </div>
@@ -67,6 +55,7 @@
     <script>
         const video = document.getElementById('camera-view');
         const outputCanvas = document.getElementById('output-canvas');
+        const debugCanvas = document.getElementById('debug-canvas');
         const scanBtn = document.getElementById('scan-btn');
         const status = document.getElementById('status');
 
@@ -91,9 +80,9 @@
                 let gray = new cv.Mat();
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
                 
-                // 1. Karte finden
+                // 1. Karte finden via Canny
                 let edges = new cv.Mat();
-                cv.Canny(gray, edges, 75, 150);
+                cv.Canny(gray, edges, 60, 120);
                 let contours = new cv.MatVector();
                 let hierarchy = new cv.Mat();
                 cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
@@ -107,9 +96,9 @@
                         maxArea = area; targetCircle = circle;
                     }
                 }
-                if (!targetCircle) throw new Error("Karte nicht gefunden.");
+                if (!targetCircle) throw new Error("Keine Karte im Bild!");
 
-                // 2. Crop
+                // 2. Crop auf 512x512
                 let tr = targetCircle.radius;
                 let rect = new cv.Rect(targetCircle.center.x - tr, targetCircle.center.y - tr, tr * 2, tr * 2);
                 rect.x = Math.max(0, rect.x); rect.y = Math.max(0, rect.y);
@@ -120,7 +109,7 @@
                 let gray512 = new cv.Mat();
                 cv.cvtColor(target, gray512, cv.COLOR_RGBA2GRAY, 0);
 
-                // 3. Histogramm
+                // 3. Histogramm-Filterung
                 let mask = cv.Mat.zeros(512, 512, cv.CV_8U);
                 cv.circle(mask, new cv.Point(256, 256), 250, [255, 255, 255, 255], -1);
                 let totalPx = Math.PI * 250 * 250;
@@ -130,7 +119,7 @@
                 cv.calcHist(srcVec, [0], mask, hist, [256], [0, 256]);
                 let tempHist = Array.from(hist.data32F);
 
-                // --- TUNING: Hauptfarben ignorieren ---
+                // Hauptfarben eliminieren (sehr aggressiv)
                 let cardColors = parseInt(document.getElementById('color-count').value);
                 let colorRange = parseInt(document.getElementById('color-range').value);
                 for(let c = 0; c < cardColors; c++) {
@@ -139,20 +128,16 @@
                     for(let i = Math.max(0, maxIdx - colorRange); i <= Math.min(255, maxIdx + colorRange); i++) tempHist[i] = 0;
                 }
 
-                // --- TUNING: Loch-Graustufen finden (Sliding Window) ---
+                // Löcher finden via Sliding Window
                 let isHoleBin = new Array(256).fill(false);
                 let holeRange = parseInt(document.getElementById('hole-range').value);
                 let sens = parseFloat(document.getElementById('sensitivity').value) / 100;
-                
                 for(let i = 0; i <= (256 - holeRange); i++) {
-                    let windowSum = 0;
-                    for(let j = 0; j < holeRange; j++) windowSum += tempHist[i+j];
-                    if ((windowSum / totalPx) > sens) {
-                        for(let j = 0; j < holeRange; j++) isHoleBin[i+j] = true;
-                    }
+                    let sum = 0; for(let j = 0; j < holeRange; j++) sum += tempHist[i+j];
+                    if ((sum / totalPx) > sens) { for(let j = 0; j < holeRange; j++) isHoleBin[i+j] = true; }
                 }
 
-                // 4. Räumliche Maske bauen
+                // 4. Maske & Debug-Bild
                 let holeMask = cv.Mat.zeros(512, 512, cv.CV_8U);
                 for(let i=0; i<256; i++) {
                     if(isHoleBin[i]) {
@@ -165,12 +150,13 @@
                     }
                 }
                 cv.bitwise_and(holeMask, mask, holeMask);
+                cv.imshow('debug-canvas', holeMask); // Hier siehst du das "Skelett" der Erkennung
 
+                // 5. Treffer zählen
                 let holeContours = new cv.MatVector();
                 let hH = new cv.Mat();
                 cv.findContours(holeMask, holeContours, hH, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-                // --- TUNING: Flächen-Validierung ---
                 let treffer = [];
                 let ringCount = parseInt(document.getElementById('ring-count').value);
                 let minAreaThreshold = parseFloat(document.getElementById('min-area-pct').value) / 100;
@@ -179,27 +165,24 @@
                 for (let i = 0; i < holeContours.size(); ++i) {
                     let cnt = holeContours.get(i);
                     let area = cv.contourArea(cnt);
-                    
                     if (area > (totalPx * minAreaThreshold)) { 
                         let M = cv.moments(cnt);
                         let cx = M.m10/M.m00, cy = M.m01/M.m00;
                         let dist = Math.hypot(cx - 256, cy - 256);
-                        
                         let punkte = 10 - Math.floor(dist / ringWidth);
-                        punkte = Math.max(10 - ringCount + 1, Math.min(10, punkte));
-
-                        treffer.push(punkte);
-                        cv.circle(target, new cv.Point(cx, cy), 12, [0, 255, 0, 255], 3);
-                        cv.putText(target, punkte.toString(), new cv.Point(cx-10, cy-15), 0, 0.7, [255,255,0,255], 2);
+                        treffer.push(Math.max(10 - ringCount + 1, Math.min(10, punkte)));
+                        cv.circle(target, new cv.Point(cx, cy), 15, [0, 255, 0, 255], 3);
                     }
                 }
 
                 cv.imshow('output-canvas', target);
-                video.style.display = 'none'; outputCanvas.style.display = 'block';
-                document.getElementById('result-panel').style.display = 'block';
+                video.classList.add('hidden');
+                outputCanvas.classList.remove('hidden');
+                document.getElementById('debug-area').classList.remove('hidden');
+                document.getElementById('result-panel').classList.remove('hidden');
                 zeige(treffer);
-                status.innerText = "Fertig!";
-                document.getElementById('reset-btn').style.display = 'block';
+                status.innerText = "Scan abgeschlossen!";
+                document.getElementById('reset-btn').classList.remove('hidden');
 
                 [src, gray, edges, contours, hierarchy, target, gray512, mask, hist, holeMask, holeContours, hH].forEach(m => { if(m) m.delete(); });
             } catch (e) {
@@ -210,8 +193,7 @@
 
         function zeige(t) {
             const l = document.getElementById('results-list');
-            l.innerHTML = "";
-            let s = 0;
+            l.innerHTML = ""; let s = 0;
             t.sort((a,b) => b-a).forEach(p => { 
                 l.innerHTML += `<div class="res"><span>Ring ${p}</span><span>1x</span></div>`;
                 s += p;
