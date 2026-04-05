@@ -149,10 +149,17 @@
             let gray = new cv.Mat();
             let bw = new cv.Mat();
             
-            // 1. High-Contrast Preprocessing
+            // 1. High-Contrast Preprocessing mit Blur (verhindert das Aufreißen dünner Linien)
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-            // Aggressives Thresholding (Blockgröße 31, C=10)
-            cv.adaptiveThreshold(gray, bw, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 31, 10);
+
+            // Ein leichter Blur verdickt dünne Linien minimal, damit sie beim Threshold nicht verschwinden
+            let ksize = new cv.Size(5, 5);
+            cv.GaussianBlur(gray, gray, ksize, 0, 0, cv.BORDER_DEFAULT);
+
+            // Den C-Wert von 10 auf 3 reduzieren! So werden auch dünnere/schwächere Linien erhalten.
+            cv.adaptiveThreshold(gray, bw, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 31, 3);
+            // Thresholding auf dem perfekten Warp (C-Wert auf 4 reduzieren für bessere Locherkennung)
+            cv.adaptiveThreshold(warpedGray, warpedBw, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 21, 4);
 
             // 2. Target Detection & Perspective Warp
             let contours = new cv.MatVector();
