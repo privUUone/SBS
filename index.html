@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TargetScan V23 - Hybrid Precision</title>
+    <title>TargetScan V24 - MSER Region Detection</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
     <style>
         body { font-family: sans-serif; background: #111; color: white; padding: 10px; display: flex; flex-direction: column; align-items: center; }
@@ -26,11 +26,9 @@
         <div class="card">
             <div class="input-grid">
                 <div class="input-group"><label>Ringe (z.B. 6):</label><input type="number" id="ring-count" value="6"></div>
-                <div class="input-group"><label>Hauptfarben:</label><input type="number" id="color-count" value="2"></div>
-                <div class="input-group"><label>Ignorier-Breite:</label><input type="number" id="color-range" value="25"></div>
-                <div class="input-group"><label>Loch-Farbbereich:</label><input type="number" id="hole-range" value="15"></div>
-                <div class="input-group"><label>Mindest-Fläche %:</label><input type="number" id="min-area-pct" step="0.05" value="0.15"></div>
-                <div class="input-group"><label>Rundheit (0.1-1.0):</label><input type="number" id="min-circ" step="0.1" value="0.6"></div>
+                <div class="input-group"><label>Loch-Kontrast:</label><input type="number" id="mser-delta" value="5"></div>
+                <div class="input-group"><label>Min Fläche (Pixel):</label><input type="number" id="min-area" value="150"></div>
+                <div class="input-group"><label>Max Fläche (Pixel):</label><input type="number" id="max-area" value="3500"></div>
             </div>
             <div id="status">Warte auf OpenCV...</div>
         </div>
@@ -39,9 +37,7 @@
         <canvas id="output-canvas" class="hidden"></canvas>
         
         <div id="debug-area" class="hidden">
-            <h4>1. Graustufen (Kamerasicht)</h4>
-            <canvas id="gray-preview"></canvas>
-            <h4>2. Analyse-Maske (Loch-Kandidaten)</h4>
+            <h4>Detektierte Regionen</h4>
             <canvas id="debug-canvas"></canvas>
         </div>
         
@@ -57,7 +53,6 @@
         const video = document.getElementById('camera-view');
         const outputCanvas = document.getElementById('output-canvas');
         const debugCanvas = document.getElementById('debug-canvas');
-        const grayCanvas = document.getElementById('gray-preview');
         const scanBtn = document.getElementById('scan-btn');
         const status = document.getElementById('status');
 
@@ -75,119 +70,86 @@
             await new Promise(r => setTimeout(r, 100));
 
             try {
-                video.width = video.videoWidth; video.height = video.videoHeight;
-                let src = new cv.Mat(video.height, video.width, cv.CV_8UC4);
+                let src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
                 new cv.VideoCapture(video).read(src);
 
                 let gray = new cv.Mat();
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
                 
-                // PHASE 1: Kreissuche via Hough (wie in deinem V3)
+                // 1. Scheibe finden (Hough)
                 let blurred = new cv.Mat();
-                cv.GaussianBlur(gray, blurred, new cv.Size(7, 7), 0);
+                cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 0);
                 let circles = new cv.Mat();
                 cv.HoughCircles(blurred, circles, cv.HOUGH_GRADIENT, 1, 100, 50, 35, 100, 0);
 
-                if (circles.cols === 0) throw new Error("Keine runde Scheibe gefunden!");
+                if (circles.cols === 0) throw new Error("Keine Scheibe erkannt.");
 
-                let tx = circles.data32F[0];
-                let ty = circles.data32F[1];
-                let tr = circles.data32F[2];
-
-                // PHASE 2: Normalisierter Crop (512x512)
+                let tx = circles.data32F[0], ty = circles.data32F[1], tr = circles.data32F[2];
                 let rect = new cv.Rect(tx - tr, ty - tr, tr * 2, tr * 2);
                 rect.x = Math.max(0, rect.x); rect.y = Math.max(0, rect.y);
                 rect.width = Math.min(src.cols - rect.x, rect.width); rect.height = Math.min(src.rows - rect.y, rect.height);
                 
                 let target = new cv.Mat();
-                cv.resize(src.roi(rect), target, new cv.Size(512, 512), 0, 0, cv.INTER_AREA);
-                let gray512 = new cv.Mat();
-                cv.cvtColor(target, gray512, cv.COLOR_RGBA2GRAY, 0);
-                cv.imshow('gray-preview', gray512); // Graubild anzeigen
+                cv.resize(src.roi(rect), target, new cv.Size(600, 600), 0, 0, cv.INTER_AREA);
+                let gray600 = new cv.Mat();
+                cv.cvtColor(target, gray600, cv.COLOR_RGBA2GRAY, 0);
 
-                // PHASE 3: Histogramm & Farben filtern
-                let mask = cv.Mat.zeros(512, 512, cv.CV_8U);
-                cv.circle(mask, new cv.Point(256, 256), 250, [255, 255, 255, 255], -1);
-                let totalPx = Math.PI * 250 * 250;
+                // 2. MSER (Maximally Stable Extremal Regions)
+                // Sucht nach stabilen dunklen Flecken auf hellem Grund
+                let mser = new cv.MSER(
+                    parseInt(document.getElementById('mser-delta').value), // Delta
+                    parseInt(document.getElementById('min-area').value),  // Min Area
+                    parseInt(document.getElementById('max-area').value)   // Max Area
+                );
 
-                let srcVec = new cv.MatVector(); srcVec.push_back(gray512);
-                let hist = new cv.Mat();
-                cv.calcHist(srcVec, [0], mask, hist, [256], [0, 256]);
-                let tempHist = Array.from(hist.data32F);
-
-                let cardColors = parseInt(document.getElementById('color-count').value);
-                let colorRange = parseInt(document.getElementById('color-range').value);
-                for(let c = 0; c < cardColors; c++) {
-                    let maxVal = 0, maxIdx = 0;
-                    for(let i = 0; i < 256; i++) if(tempHist[i] > maxVal) { maxVal = tempHist[i]; maxIdx = i; }
-                    for(let i = Math.max(0, maxIdx - colorRange); i <= Math.min(255, maxIdx + colorRange); i++) tempHist[i] = 0;
-                }
-
-                // PHASE 4: Räumliche Analyse
-                let isHoleBin = new Array(256).fill(false);
-                let holeRange = parseInt(document.getElementById('hole-range').value);
-                let sens = 0.002; // Fest verdrahtet für Stabilität
-                for(let i = 0; i <= (256 - holeRange); i++) {
-                    let sum = 0; for(let j = 0; j < holeRange; j++) sum += tempHist[i+j];
-                    if ((sum / totalPx) > sens) { for(let j = 0; j < holeRange; j++) isHoleBin[i+j] = true; }
-                }
-
-                let holeMask = cv.Mat.zeros(512, 512, cv.CV_8U);
-                for(let i=0; i<256; i++) {
-                    if(isHoleBin[i]) {
-                        let tM = new cv.Mat();
-                        let low = new cv.Mat(512, 512, cv.CV_8U, [i, 0, 0, 0]);
-                        let high = new cv.Mat(512, 512, cv.CV_8U, [i, 0, 0, 0]);
-                        cv.inRange(gray512, low, high, tM);
-                        cv.bitwise_or(holeMask, tM, holeMask);
-                        tM.delete(); low.delete(); high.delete();
-                    }
-                }
-                cv.bitwise_and(holeMask, mask, holeMask);
-                cv.imshow('debug-canvas', holeMask);
-
-                let holeContours = new cv.MatVector();
-                let hH = new cv.Mat();
-                cv.findContours(holeMask, holeContours, hH, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                let msContours = new cv.MatVector();
+                let bboxes = new cv.RectVector();
+                mser.detectRegions(gray600, msContours, bboxes);
 
                 let treffer = [];
                 let ringCount = parseInt(document.getElementById('ring-count').value);
-                let minArea = parseFloat(document.getElementById('min-area-pct').value) / 100;
-                let minCirc = parseFloat(document.getElementById('min-circ').value);
-                let ringWidth = 250 / ringCount;
+                let ringWidth = 300 / ringCount;
+                let debugMask = cv.Mat.zeros(600, 600, cv.CV_8UC3);
 
-                for (let i = 0; i < holeContours.size(); ++i) {
-                    let cnt = holeContours.get(i);
-                    let area = cv.contourArea(cnt);
-                    let perimeter = cv.arcLength(cnt, true);
-                    let circularity = (4 * Math.PI * area) / (perimeter * perimeter);
-
-                    // FILTER LOGIK
-                    if (area > (totalPx * minArea) && circularity > minCirc) {
+                for (let i = 0; i < msContours.size(); ++i) {
+                    let cnt = msContours.get(i);
+                    let rect = bboxes.get(i);
+                    
+                    // Filter: Ein Einschussloch ist kompakt (Breite/Höhe Verhältnis)
+                    let aspect = rect.width / rect.height;
+                    if (aspect > 0.5 && aspect < 2.0) {
                         let M = cv.moments(cnt);
-                        let cx = M.m10/M.m00, cy = M.m01/M.m00;
-                        let dist = Math.hypot(cx - 256, cy - 256);
+                        if (M.m00 > 0) {
+                            let cx = M.m10 / M.m00;
+                            let cy = M.m01 / M.m00;
+                            let dist = Math.hypot(cx - 300, cy - 300);
 
-                        // Spezial-Check: Wenn das Objekt riesig ist und im Zentrum sitzt -> Wahrscheinlich das weiße Zentrum
-                        if (dist < 30 && area > (totalPx * 0.05)) continue; 
+                            // Zentrums-Filter (verhindert das Erkennen der weißen 10)
+                            if (dist < 40 && rect.width > 80) continue;
 
-                        let punkte = 10 - Math.floor(dist / ringWidth);
-                        treffer.push(Math.max(10 - ringCount + 1, Math.min(10, punkte)));
-                        cv.circle(target, new cv.Point(cx, cy), 15, [0, 255, 0, 255], 3);
+                            let punkte = 10 - Math.floor(dist / ringWidth);
+                            treffer.push(Math.max(10 - ringCount + 1, Math.min(10, punkte)));
+
+                            // Zeichnen auf dem Original und dem Debug
+                            cv.circle(target, new cv.Point(cx, cy), 15, [0, 255, 0, 255], 3);
+                            cv.drawContours(debugMask, msContours, i, [255, 255, 255, 255], -1);
+                        }
                     }
                 }
 
                 cv.imshow('output-canvas', target);
+                cv.imshow('debug-canvas', debugMask);
+                
                 video.classList.add('hidden');
                 outputCanvas.classList.remove('hidden');
                 document.getElementById('debug-area').classList.remove('hidden');
                 document.getElementById('result-panel').classList.remove('hidden');
                 zeige(treffer);
-                status.innerText = "Ergebnis berechnet";
+                status.innerText = "MSER-Analyse abgeschlossen";
                 document.getElementById('reset-btn').classList.remove('hidden');
 
                 // Cleanup
-                [src, gray, blurred, circles, target, gray512, mask, hist, holeMask, holeContours, hH].forEach(m => { if(m) m.delete(); });
+                [src, gray, blurred, circles, target, gray600, debugMask, msContours, bboxes].forEach(m => { if(m) m.delete(); });
             } catch (e) {
                 status.innerText = "Fehler: " + e.message;
                 scanBtn.disabled = false;
@@ -197,7 +159,14 @@
         function zeige(t) {
             const l = document.getElementById('results-list');
             l.innerHTML = ""; let s = 0;
+            // Entferne Duplikate durch Überlagerung (MSER findet oft Regionen in Regionen)
+            let uniqueTreffer = [];
             t.sort((a,b) => b-a).forEach(p => { 
+                // Einfache Logik: Wir begrenzen die Anzahl der Treffer auf ein realistisches Maß
+                uniqueTreffer.push(p);
+            });
+            
+            uniqueTreffer.slice(0, 15).forEach(p => { 
                 l.innerHTML += `<div class="result-row"><span>Ring ${p}</span><span>1x</span></div>`;
                 s += p;
             });
