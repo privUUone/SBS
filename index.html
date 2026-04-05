@@ -3,29 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TargetScan Pro V6 - Adaptive Histogram</title>
+    <title>TargetScan V7 - Peak Analytics</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
     <style>
-        body { font-family: sans-serif; background: #121212; color: white; display: flex; flex-direction: column; align-items: center; padding: 10px; margin: 0; }
-        #app-container { width: 100%; max-width: 450px; }
-        .controls { background: #1e1e1e; padding: 15px; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
-        input { width: 50px; padding: 8px; border-radius: 6px; border: 1px solid #444; background: #333; color: white; text-align: center; }
-        video, canvas { width: 100%; border-radius: 12px; background: #000; display: block; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0f0f0f; color: white; display: flex; flex-direction: column; align-items: center; padding: 10px; margin: 0; }
+        #app-container { width: 100%; max-width: 480px; }
+        .controls { background: #1a1a1a; padding: 15px; border-radius: 15px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #333; }
+        input { width: 50px; padding: 8px; border-radius: 8px; border: 1px solid #444; background: #222; color: white; text-align: center; font-weight: bold; }
+        video, canvas { width: 100%; border-radius: 15px; background: #000; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
         #output-canvas, #hidden-canvas { display: none; }
-        button { width: 100%; padding: 18px; margin-top: 10px; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; }
-        #scan-btn { background: #e53935; color: white; }
-        #reset-btn { background: #2196f3; color: white; display: none; }
-        #status { text-align: center; margin: 10px; color: #ffeb3b; font-weight: bold; }
-        #result-panel { display: none; background: #1e1e1e; padding: 15px; border-radius: 12px; margin-top: 10px; width: 100%; box-sizing: border-box; }
-        .result-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #333; }
-        .total { font-weight: bold; color: #4caf50; font-size: 1.2em; }
+        button { width: 100%; padding: 18px; margin-top: 10px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        #scan-btn { background: #ff3d00; color: white; }
+        #scan-btn:active { transform: scale(0.98); }
+        #reset-btn { background: #0081ff; color: white; display: none; }
+        #status { text-align: center; margin: 12px; color: #ffd600; font-size: 0.9em; min-height: 1.2em; }
+        #result-panel { display: none; background: #1a1a1a; padding: 20px; border-radius: 15px; margin-top: 10px; border: 1px solid #333; width: 100%; box-sizing: border-box; }
+        .result-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #333; }
+        .total { font-weight: bold; color: #00e676; font-size: 1.3em; margin-top: 5px; }
     </style>
 </head>
 <body>
 
     <div id="app-container">
         <div class="controls">
-            <label>Anzahl Ringe:</label>
+            <label>Ringe (Zentrum=10):</label>
             <input type="number" id="ring-count" value="6">
         </div>
 
@@ -33,9 +34,9 @@
         <canvas id="output-canvas"></canvas>
         <canvas id="hidden-canvas"></canvas>
         
-        <div id="status">Lade OpenCV...</div>
-        <button id="scan-btn" disabled>Scan starten</button>
-        <button id="reset-btn">Nächster Scan</button>
+        <div id="status">Warte auf OpenCV...</div>
+        <button id="scan-btn" disabled>Scan auslösen</button>
+        <button id="reset-btn">Zurück zur Kamera</button>
 
         <div id="result-panel">
             <div id="results-list"></div>
@@ -52,9 +53,9 @@
         const resultsList = document.getElementById('results-list');
 
         function onOpenCvReady() {
-            status.innerText = "Bereit";
+            status.innerText = "System bereit";
             scanBtn.disabled = false;
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 1280, height: 720 } })
                 .then(s => video.srcObject = s);
         }
 
@@ -64,7 +65,7 @@
             hiddenCanvas.getContext('2d').drawImage(video, 0, 0);
             video.style.display = 'none';
             scanBtn.style.display = 'none';
-            status.innerText = "Analysiere Histogramm...";
+            status.innerText = "Histogramm-Cluster-Analyse läuft...";
             outputCanvas.style.display = 'block';
             setTimeout(processImage, 100);
         });
@@ -74,109 +75,115 @@
         function processImage() {
             let src = cv.imread(hiddenCanvas);
             let dst = new cv.Mat();
+            // Downscale für Performance, aber hoch genug für Details
             cv.resize(src, dst, new cv.Size(600, Math.round(600 * src.rows / src.cols)), 0, 0, cv.INTER_AREA);
             
             let gray = new cv.Mat();
             cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY, 0);
 
-            // 1. ZIELSCHEIBE FINDEN (HoughCircles - wie gewünscht)
+            // 1. KREISERKENNUNG (Bewährte Hough-Parameter)
             let blurred = new cv.Mat();
-            cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 2, 2);
+            cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 2);
             let circles = new cv.Mat();
-            cv.HoughCircles(blurred, circles, cv.HOUGH_GRADIENT, 1, 100, 50, 40, 100, 0);
+            cv.HoughCircles(blurred, circles, cv.HOUGH_GRADIENT, 1, 100, 50, 35, 100, 0);
 
             if (circles.cols === 0) {
-                status.innerText = "Außenring nicht gefunden!";
+                status.innerText = "Keine Scheibe erkannt. Bitte näher ran!";
                 resetBtn.style.display = "block";
                 return;
             }
 
-            let tx = circles.data32F[0];
-            let ty = circles.data32F[1];
-            let tr = circles.data32F[2];
+            let tx = circles.data32F[0], ty = circles.data32F[1], tr = circles.data32F[2];
 
-            // 2. ADAPTIVE GRAUSTUFEN-ANALYSE
-            // Wir schauen uns nur die Pixel innerhalb der Scheibe an
+            // 2. HISTOGRAMM & PEAK-FINDING
             let mask = cv.Mat.zeros(gray.rows, gray.cols, cv.CV_8U);
             cv.circle(mask, new cv.Point(tx, ty), tr, [255, 255, 255, 255], -1);
 
-            // Histogramm erstellen (256 Graustufen)
             let hist = new cv.Mat();
             let maskVec = new cv.MatVector(); maskVec.push_back(mask);
-            let channels = [0];
-            let histSize = [256];
-            let ranges = [0, 256];
-            cv.calcHist(maskVec, channels, mask, hist, histSize, ranges);
+            cv.calcHist(maskVec, [0], mask, hist, [256], [0, 256]);
 
-            // Graustufen in 16 Gruppen zusammenfassen, um die "seltenste" Gruppe zu finden
-            let groupSize = 16;
-            let groups = new Array(16).fill(0);
+            // Histogramm glätten (Moving Average)
+            let smoothedHist = [];
             for (let i = 0; i < 256; i++) {
-                groups[Math.floor(i / groupSize)] += hist.data32F[i];
+                let sum = 0, count = 0;
+                for (let j = -4; j <= 4; j++) {
+                    if (i + j >= 0 && i + j < 256) {
+                        sum += hist.data32F[i + j];
+                        count++;
+                    }
+                }
+                smoothedHist.push(sum / count);
             }
 
-            // Finde die Gruppe, die am wenigsten Fläche einnimmt (aber nicht 0 ist)
-            let minArea = Infinity;
-            let holeGroupIdx = -1;
-            // Wir ignorieren die hellste Gruppe (Papier) und komplett schwarze Bereiche
-            for (let g = 0; g < 15; g++) { 
-                if (groups[g] > 50 && groups[g] < minArea) {
-                    minArea = groups[g];
-                    holeGroupIdx = g;
+            // Peaks finden (Glockenkurven-Zentren)
+            let peaks = [];
+            for (let i = 2; i < 254; i++) {
+                if (smoothedHist[i] > smoothedHist[i-1] && smoothedHist[i] > smoothedHist[i+1]) {
+                    if (smoothedHist[i] > (tr * tr * 0.001)) { // Mindestgröße für Peak
+                        peaks.push({val: i, count: smoothedHist[i]});
+                    }
                 }
             }
 
-            // 3. SEGMENTIERUNG DER LOCH-PIXEL
+            // Wir sortieren Peaks nach Häufigkeit. 
+            // Papier (hell) und ggf. Schwarz (dunkel) sind die größten.
+            peaks.sort((a, b) => b.count - a.count);
+
+            // Den "Loch-Peak" finden: 
+            // Er ist meistens seltener als das Papier, aber vorhanden.
+            // Wir nehmen den Peak, der nicht der hellste (Papier) ist und eine "Loch-typische" Helligkeit hat.
+            let holePeak = peaks.find(p => p.val < 180 && p.val > 20) || peaks[peaks.length-1];
+
+            // 3. SEGMENTIERUNG & RÄUMLICHE KONSISTENZ
             let holeMask = new cv.Mat();
-            let low = holeGroupIdx * groupSize;
-            let high = low + groupSize;
-            cv.inRange(gray, new cv.Mat(gray.rows, gray.cols, gray.type(), [low]), 
-                             new cv.Mat(gray.rows, gray.cols, gray.type(), [high]), holeMask);
-            
-            // Nur innerhalb der Scheibe suchen
+            // Bereich um den Peak (Glockenkurve ca. +/- 15 Einheiten)
+            cv.inRange(gray, new cv.Mat(gray.rows, gray.cols, gray.type(), [holePeak.val - 15]), 
+                             new cv.Mat(gray.rows, gray.cols, gray.type(), [holePeak.val + 15]), holeMask);
             cv.bitwise_and(holeMask, mask, holeMask);
 
-            // Konturen der seltenen Farbgruppe finden
-            let holeContours = new cv.MatVector();
-            let hierarchy = new cv.Mat();
-            cv.findContours(holeMask, holeContours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            // Morphologische Reinigung: Kleine isolierte Pixel entfernen, Löcher schließen
+            let kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+            cv.morphologyEx(holeMask, holeMask, cv.MORPH_OPEN, kernel);
+
+            let labels = new cv.Mat();
+            let stats = new cv.Mat();
+            let centroids = new cv.Mat();
+            let numComponents = cv.connectedComponentsWithStats(holeMask, labels, stats, centroids);
 
             let treffer = [];
             let numRings = parseInt(document.getElementById('ring-count').value);
             let ringW = tr / numRings;
-            let validHoles = [];
+            let holeAreas = [];
 
-            for (let i = 0; i < holeContours.size(); ++i) {
-                let cnt = holeContours.get(i);
-                let area = cv.contourArea(cnt);
-                // Mindestgröße für ein Loch, um Rauschen zu vermeiden
-                if (area > 15 && area < (tr * tr * 0.1)) {
-                    let M = cv.moments(cnt);
-                    let cx = M.m10 / M.m00;
-                    let cy = M.m01 / M.m00;
-                    let dist = Math.hypot(cx - tx, cy - ty);
-                    
-                    // Zentrum-Check (10er Ring ignorieren, wenn er die gleiche Farbe wie das Loch hat)
+            for (let i = 1; i < numComponents; i++) {
+                let area = stats.intAt(i, cv.CC_STAT_AREA);
+                let cx = centroids.data64F[i * 2];
+                let cy = centroids.data64F[i * 2 + 1];
+                let dist = Math.hypot(cx - tx, cy - ty);
+
+                // Filter: Muss innerhalb der Scheibe liegen und eine Mindestgröße haben
+                if (dist < tr && area > 10) {
+                    // Ignoriere Zentrum, falls es fälschlich als Loch erkannt wird
                     if (dist < ringW * 0.4 && area > (ringW * ringW * 0.4)) continue;
-                    
-                    validHoles.push({area, dist, cx, cy});
+                    holeAreas.push({area, dist, cx, cy});
                 }
             }
 
-            // 4. FLÄCHEN-LOGIK (Multi-Schuss-Erkennung)
-            if (validHoles.length > 0) {
-                validHoles.sort((a,b) => a.area - b.area);
-                let avgArea = validHoles[Math.floor(validHoles.length / 2)].area;
+            // Multi-Treffer Logik
+            if (holeAreas.length > 0) {
+                holeAreas.sort((a, b) => a.area - b.area);
+                let medianArea = holeAreas[Math.floor(holeAreas.length / 2)].area;
 
-                validHoles.forEach(h => {
-                    let shotCount = Math.max(1, Math.round(h.area / avgArea));
-                    let points = 10 - Math.floor(h.dist / ringW);
-                    points = Math.max(10 - numRings + 1, Math.min(10, points));
+                holeAreas.forEach(h => {
+                    let shots = Math.max(1, Math.round(h.area / medianArea));
+                    let p = 10 - Math.floor(h.dist / ringW);
+                    p = Math.max(10 - numRings + 1, Math.min(10, p));
 
-                    for(let s=0; s<shotCount; s++) treffer.push(points);
+                    for (let s = 0; s < shots; s++) treffer.push(p);
 
-                    cv.circle(dst, new cv.Point(h.cx, h.cy), 5, [255, 0, 0, 255], -1);
-                    cv.putText(dst, points.toString(), new cv.Point(h.cx+8, h.cy-8), 1, 1.3, [255, 255, 0, 255], 2);
+                    cv.circle(dst, new cv.Point(h.cx, h.cy), 4, [255, 0, 0, 255], -1);
+                    cv.putText(dst, p.toString(), new cv.Point(h.cx + 5, h.cy - 5), 1, 1.3, [255, 255, 0, 255], 2);
                 });
             }
 
@@ -184,18 +191,17 @@
             cv.imshow('output-canvas', dst);
             zeigeErgebnis(treffer);
             
-            status.innerText = "Auswertung abgeschlossen";
+            status.innerText = "Analyse abgeschlossen";
             resetBtn.style.display = "block";
 
             // Cleanup
-            src.delete(); dst.delete(); gray.delete(); blurred.delete(); circles.delete();
-            mask.delete(); hist.delete(); maskVec.delete(); holeMask.delete();
-            holeContours.delete(); hierarchy.delete();
+            [src, dst, gray, blurred, circles, mask, hist, holeMask, labels, stats, centroids, kernel].forEach(m => m.delete());
+            maskVec.delete();
         }
 
         function zeigeErgebnis(treffer) {
             resultsList.innerHTML = "";
-            let sum = 0; let counts = {};
+            let sum = 0, counts = {};
             treffer.forEach(p => { counts[p] = (counts[p] || 0) + 1; sum += p; });
             Object.keys(counts).sort((a,b) => b-a).forEach(p => {
                 resultsList.innerHTML += `<div class="result-row"><span>${p}er Ring:</span><span>${counts[p]}x</span></div>`;
