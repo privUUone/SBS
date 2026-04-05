@@ -3,22 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TargetScan V11 - Crop & Square</title>
+    <title>TargetScan V12 - FullScale Logic</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
     <style>
         body { font-family: sans-serif; background: #111; color: white; display: flex; flex-direction: column; align-items: center; padding: 10px; margin: 0; }
         #app-container { width: 100%; max-width: 480px; }
         .card { background: #222; padding: 15px; border-radius: 12px; margin-bottom: 10px; width: 100%; box-sizing: border-box; border: 1px solid #444; }
         .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-        input { width: 50px; padding: 5px; background: #333; color: white; border: 1px solid #555; text-align: center; }
-        #progress-container { width: 100%; height: 8px; background: #333; border-radius: 4px; margin: 10px 0; overflow: hidden; display: none; }
-        #progress-bar { width: 0%; height: 100%; background: #4caf50; }
+        input { width: 60px; padding: 8px; background: #333; color: white; border: 1px solid #555; text-align: center; border-radius: 5px; }
+        #progress-container { width: 100%; height: 10px; background: #333; border-radius: 5px; margin: 10px 0; overflow: hidden; display: none; }
+        #progress-bar { width: 0%; height: 100%; background: #00e676; transition: width 0.2s; }
         video, canvas { width: 100%; border-radius: 10px; background: #000; }
-        #output-canvas { display: none; border: 2px solid #4caf50; }
-        button { width: 100%; padding: 18px; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 5px; }
+        #output-canvas { display: none; }
+        button { width: 100%; padding: 20px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 5px; }
         #scan-btn { background: #e53935; color: white; }
+        #scan-btn:disabled { background: #444; }
         #reset-btn { background: #2196f3; color: white; display: none; }
-        #status { text-align: center; color: #ffeb3b; font-size: 14px; margin: 5px 0; }
+        #status { text-align: center; color: #ffeb3b; font-size: 14px; margin: 8px 0; min-height: 1.2em; }
     </style>
 </head>
 <body>
@@ -26,24 +27,24 @@
     <div id="app-container">
         <div class="card">
             <div class="row">
-                <label>Anzahl Ringe:</label>
+                <label>Ringe (Zentrum=10):</label>
                 <input type="number" id="ring-count" value="6">
             </div>
             <div class="row">
-                <label>Karten-Farben (meist 2):</label>
+                <label>Karten-Hauptfarben:</label>
                 <input type="number" id="color-count" value="2">
             </div>
             <div id="progress-container"><div id="progress-bar"></div></div>
-            <div id="status">Warte auf Kamera...</div>
+            <div id="status">Warte auf OpenCV...</div>
         </div>
 
         <video id="camera-view" autoplay playsinline></video>
         <canvas id="output-canvas"></canvas>
         
-        <button id="scan-btn" disabled>Scan starten</button>
-        <button id="reset-btn">Nächster Versuch</button>
+        <button id="scan-btn" disabled>Scan auslösen</button>
+        <button id="reset-btn">Nächster Scan</button>
 
-        <div id="result-panel" class="card" style="display:none; margin-top:10px;">
+        <div id="result-panel" class="card" style="display:none;">
             <div id="results-list"></div>
         </div>
     </div>
@@ -60,10 +61,10 @@
         const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
         function onOpenCvReady() {
-            status.innerText = "Bereit";
+            status.innerText = "System bereit";
             scanBtn.disabled = false;
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 1280 } })
-                .then(s => video.srcObject = s);
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } })
+                .then(s => video.srcObject = s).catch(e => status.innerText = "Kamera-Zugriff verweigert");
         }
 
         function updateUI(percent, text) {
@@ -72,133 +73,137 @@
         }
 
         scanBtn.addEventListener('click', async () => {
-            updateUI(5, "Erfasse Bild...");
-            progressContainer.style.display = 'block';
             scanBtn.disabled = true;
+            progressContainer.style.display = 'block';
+            updateUI(5, "Starte Bildaufnahme...");
+            await sleep(50);
+            
+            try {
+                await processImage();
+            } catch (e) {
+                console.error(e);
+                status.innerText = "Fehler: " + e.message;
+                resetBtn.style.display = "block";
+            }
+        });
 
-            // 1. Snapshot auf verstecktem Canvas
-            let cap = new cv.VideoCapture(video);
+        async function processImage() {
+            // 1. Snapshot vom Video
             let src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
+            let cap = new cv.VideoCapture(video);
             cap.read(src);
+            updateUI(20, "Vollbild-Analyse (Kreis)...");
+            await sleep(50);
 
-            // 2. Schnelle Kreissuche
-            updateUI(20, "Suche Außenring...");
-            await sleep(1);
-            let small = new cv.Mat();
-            cv.resize(src, small, new cv.Size(300, 300 * src.rows / src.cols), 0, 0, cv.INTER_AREA);
+            // 2. Kreiserkennung am vollen Bild (Deine bewährte Logik)
             let gray = new cv.Mat();
-            cv.cvtColor(small, gray, cv.COLOR_RGBA2GRAY, 0);
-            cv.GaussianBlur(gray, gray, new cv.Size(7, 7), 1.5);
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+            let blurred = new cv.Mat();
+            cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 2);
             
             let circles = new cv.Mat();
-            cv.HoughCircles(gray, circles, cv.HOUGH_GRADIENT, 1, 100, 50, 35, 80, 150);
+            cv.HoughCircles(blurred, circles, cv.HOUGH_GRADIENT, 1, 100, 50, 35, 100, 0);
 
             if (circles.cols === 0) {
-                status.innerText = "Fehler: Kein Kreis gefunden!";
+                status.innerText = "Kein Kreis gefunden. Bitte Karte zentrieren!";
                 resetBtn.style.display = "block";
-                src.delete(); small.delete(); gray.delete(); circles.delete();
+                src.delete(); gray.delete(); blurred.delete(); circles.delete();
                 return;
             }
 
-            // Kreis-Daten (skaliert auf Original)
-            let ratio = src.cols / 300;
-            let cx_orig = circles.data32F[0] * ratio;
-            let cy_orig = circles.data32F[1] * ratio;
-            let r_orig = circles.data32F[2] * ratio;
+            let tx = circles.data32F[0], ty = circles.data32F[1], tr = circles.data32F[2];
+            updateUI(40, "Bild zuschneiden & skalieren...");
+            await sleep(50);
 
-            // 3. CROP & SQUARE (512x512)
-            updateUI(40, "Scheibe ausschneiden...");
-            await sleep(1);
-            let rect = new cv.Rect(cx_orig - r_orig, cy_orig - r_orig, r_orig * 2, r_orig * 2);
-            // Sicherheitscheck für Bildränder
+            // 3. CROP auf die Scheibe
+            let rect = new cv.Rect(tx - tr, ty - tr, tr * 2, tr * 2);
+            // Rand-Check
             rect.x = Math.max(0, rect.x); rect.y = Math.max(0, rect.y);
             rect.width = Math.min(src.cols - rect.x, rect.width);
             rect.height = Math.min(src.rows - rect.y, rect.height);
             
             let cropped = src.roi(rect);
-            let finalTarget = new cv.Mat();
-            cv.resize(cropped, finalTarget, new cv.Size(512, 512), 0, 0, cv.INTER_AREA);
-            
-            // 4. Graubereich-Anomalie (nur auf 512x512)
-            updateUI(60, "Farben analysieren...");
-            await sleep(1);
-            let finalGray = new cv.Mat();
-            cv.cvtColor(finalTarget, finalGray, cv.COLOR_RGBA2GRAY, 0);
-            
-            // Histogramm
-            let hist = new cv.Mat();
-            let mask = cv.Mat.ones(512, 512, cv.CV_8U); 
-            // Kreismaske im 512er Bild: Zentrum ist 256/256
-            cv.circle(mask, new cv.Point(256, 256), 254, [0, 0, 0, 0], -1, cv.LINE_AA);
-            cv.bitwise_not(mask, mask); // Wir wollen das Innere
+            let target512 = new cv.Mat();
+            cv.resize(cropped, target512, new cv.Size(512, 512), 0, 0, cv.INTER_AREA);
 
+            // 4. Graubereich-Extraktion (0.9% Logik)
+            updateUI(65, "Anomalie-Farben messen...");
+            await sleep(50);
+            let gray512 = new cv.Mat();
+            cv.cvtColor(target512, gray512, cv.COLOR_RGBA2GRAY, 0);
+            
+            let mask = cv.Mat.zeros(512, 512, cv.CV_8U);
+            cv.circle(mask, new cv.Point(256, 256), 254, [255, 255, 255, 255], -1);
+
+            let hist = new cv.Mat();
             let maskVec = new cv.MatVector(); maskVec.push_back(mask);
             cv.calcHist(maskVec, [0], mask, hist, [256], [0, 256]);
 
             let bins = [];
-            for(let i=0; i<256; i++) bins.push({v: i, c: hist.data32F[i]});
-            bins.sort((a,b) => b.c - a.c);
-
-            let cardColors = bins.slice(0, parseInt(document.getElementById('color-count').value)).map(b => b.v);
-            
-            // Anomalie-Maske erstellen
-            let anomalyMask = cv.Mat.zeros(512, 512, cv.CV_8U);
             for(let i=0; i<256; i++) {
-                if(!cardColors.includes(i) && hist.data32F[i] > (512*512*0.0005)) { // 0.05% Schwelle
+                if(hist.data32F[i] > 0) bins.push({v: i, c: hist.data32F[i]});
+            }
+            bins.sort((a, b) => b.c - a.c);
+
+            // Kartenfarben ausschließen
+            let cardCount = parseInt(document.getElementById('color-count').value);
+            let cardColors = bins.slice(0, cardCount).map(b => b.v);
+            
+            // Maske für ALLES was nicht Karte ist (Anomalien)
+            let anomalyMask = cv.Mat.zeros(512, 512, cv.CV_8U);
+            let minPixels = (Math.PI * 256 * 256) * 0.005; // 0.5% als Startwert
+
+            for(let b of bins) {
+                if(!cardColors.includes(b.v) && b.c > minPixels && b.v < 225) {
                     let temp = new cv.Mat();
-                    cv.inRange(finalGray, new cv.Mat(512, 512, cv.CV_8U, [i]), new cv.Mat(512, 512, cv.CV_8U, [i]), temp);
+                    cv.inRange(gray512, new cv.Mat(512, 512, cv.CV_8U, [b.v-1]), new cv.Mat(512, 512, cv.CV_8U, [b.v+1]), temp);
                     cv.bitwise_or(anomalyMask, temp, anomalyMask);
                     temp.delete();
                 }
             }
             cv.bitwise_and(anomalyMask, mask, anomalyMask);
 
-            // Rauschunterdrückung (WICHTIG gegen Aufhängen!)
-            let kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
-            cv.morphologyEx(anomalyMask, anomalyMask, cv.MORPH_OPEN, kernel);
-
-            // 5. Punkte berechnen
-            updateUI(85, "Treffer auswerten...");
-            await sleep(1);
+            // 5. Treffer-Berechnung
+            updateUI(85, "Punkte ermitteln...");
+            await sleep(50);
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
             cv.findContours(anomalyMask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
             let treffer = [];
-            let ringCount = parseInt(document.getElementById('ring-count').value);
-            let ringWidth = 256 / ringCount; 
+            let rCount = parseInt(document.getElementById('ring-count').value);
+            let rStep = 256 / rCount;
 
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
-                if (area > 20) {
+                if (area > 30) {
                     let M = cv.moments(cnt);
-                    let cx = M.m10 / M.m00;
-                    let cy = M.m01 / M.m00;
-                    // Distanz zum Zentrum (256, 256)
+                    let cx = M.m10 / M.m00, cy = M.m01 / M.m00;
                     let d = Math.sqrt(Math.pow(cx - 256, 2) + Math.pow(cy - 256, 2));
                     
-                    let pts = 10 - Math.floor(d / ringWidth);
-                    pts = Math.max(10 - ringCount + 1, Math.min(10, pts));
-                    treffer.push(pts);
+                    let p = 10 - Math.floor(d / rStep);
+                    p = Math.max(10 - rCount + 1, Math.min(10, p));
+                    treffer.push(p);
 
-                    cv.circle(finalTarget, new cv.Point(cx, cy), 8, [255, 0, 0, 255], -1);
-                    cv.putText(finalTarget, pts.toString(), new cv.Point(cx+10, cy-10), 1, 2.0, [255, 255, 0, 255], 2);
+                    cv.circle(target512, new cv.Point(cx, cy), 10, [255, 0, 0, 255], -1);
+                    cv.putText(target512, p.toString(), new cv.Point(cx+12, cy-12), 1, 2.5, [255, 255, 0, 255], 3);
                 }
             }
 
-            updateUI(100, "Fertig!");
+            // Finale Anzeige
             video.style.display = 'none';
             outputCanvas.style.display = 'block';
-            cv.imshow('output-canvas', finalTarget);
-            
+            cv.imshow('output-canvas', target512);
             showResults(treffer);
+            
+            updateUI(100, "Scan erfolgreich");
             resetBtn.style.display = "block";
 
             // Cleanup
-            [src, small, gray, circles, cropped, finalTarget, finalGray, hist, mask, anomalyMask, kernel, contours, hierarchy].forEach(m => m.delete());
+            [src, gray, blurred, circles, cropped, target512, gray512, mask, hist, anomalyMask, contours, hierarchy].forEach(m => { if(m) m.delete() });
             maskVec.delete();
-        });
+        }
 
         function showResults(treffer) {
             const list = document.getElementById('results-list');
@@ -206,9 +211,9 @@
             let sum = 0, counts = {};
             treffer.forEach(p => { counts[p] = (counts[p] || 0) + 1; sum += p; });
             Object.keys(counts).sort((a,b) => b-a).forEach(p => {
-                list.innerHTML += `<div class="row"><span>${p}er Ring:</span><span>${counts[p]}x</span></div>`;
+                list.innerHTML += `<div class="row"><span>Ring ${p}:</span><span>${counts[p]} Treffer</span></div>`;
             });
-            list.innerHTML += `<div class="row" style="font-weight:bold; color:#4caf50; font-size:1.2em;"><span>Gesamt:</span><span>${sum}</span></div>`;
+            list.innerHTML += `<div class="row" style="border-top:2px solid #555; padding-top:10px; font-weight:bold; color:#00e676;"><span>Gesamt:</span><span>${sum} Ringe</span></div>`;
             document.getElementById('result-panel').style.display = 'block';
         }
 
