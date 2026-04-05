@@ -1,164 +1,118 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SmartShot AI - High Precision</title>
+    <meta charset="UTF-8"><title>SmartShot AI Pro</title>
     <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-        .controls { background: #1e1e1e; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
-        input, button { background: #2d2d2d; color: #fff; border: 1px solid #444; padding: 8px; border-radius: 4px; }
-        button { background: #007acc; cursor: pointer; font-weight: bold; }
-        button:disabled { background: #555; }
-        .workspace { position: relative; }
-        canvas { max-width: 100%; border: 2px solid #333; background: #000; }
-        .score-panel { position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.8); padding: 15px; border-radius: 8px; border: 1px solid #444; pointer-events: none; }
-        #status { margin-bottom: 15px; font-weight: bold; color: #ff9800; }
+        body { background: #121212; color: #fff; font-family: sans-serif; text-align: center; margin: 0; }
+        .ui { background: #1e1e1e; padding: 15px; display: flex; gap: 15px; justify-content: center; align-items: center; border-bottom: 1px solid #333; }
+        canvas { max-width: 95vw; border: 2px solid #444; margin-top: 15px; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        .score-overlay { position: absolute; top: 80px; left: 20px; background: rgba(0,0,0,0.85); padding: 15px; border-radius: 8px; border: 1px solid #007acc; text-align: left; min-width: 120px; }
+        #status { color: #007acc; font-weight: bold; }
+        input[type="number"] { width: 45px; background: #333; color: #fff; border: 1px solid #555; padding: 5px; }
     </style>
 </head>
 <body>
-
-    <h1>🎯 SmartShot AI (Warp & Dilation)</h1>
-    <div id="status">Lade OpenCV.js...</div>
-
-    <div class="controls">
-        <input type="file" id="imageInput" accept="image/*" disabled>
-        <label>Ringe: <input type="number" id="ringsInput" value="10" min="1" max="20" style="width: 50px;"></label>
-        <button id="processBtn" disabled>Analyse starten</button>
+    <div class="ui">
+        <div id="status">Lade KI...</div>
+        <input type="file" id="u-img" accept="image/*">
+        <label>Ringe: <input type="number" id="u-r" value="10"></label>
+        <button id="u-btn" style="background:#007acc; color:white; border:none; padding:8px 15px; cursor:pointer;" disabled>Analyse</button>
     </div>
-
-    <div class="workspace">
-        <img id="imageSrc" style="display:none;">
-        <canvas id="outputCanvas"></canvas>
-        <div class="score-panel" id="scorePanel" style="display:none;">
-            <div style="color: #4CAF50; font-size: 24px; font-weight: bold;">Score: <span id="totalScore">0</span></div>
-            <div style="color: #aaa;">Treffer: <span id="hitCount">0</span></div>
+    <div style="position:relative; display: inline-block;">
+        <canvas id="canvas"></canvas>
+        <div id="score-card" class="score-overlay" style="display:none">
+            <div style="font-size:1.2em; color:#4CAF50">Punkte: <span id="s-tot">0</span></div>
+            <div style="font-size:0.9em; color:#aaa">Treffer: <span id="s-hit">0</span></div>
         </div>
     </div>
 
-    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady()"></script>
-
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="cvRdy()"></script>
     <script>
-        let imgElement = document.getElementById('imageSrc');
-        let inputElement = document.getElementById('imageInput');
-        let processBtn = document.getElementById('processBtn');
+        const $ = id => document.getElementById(id);
+        let img = new Image();
+        function cvRdy() { $('status').innerText='Bereit'; $('u-btn').disabled=0; }
+        $('u-img').onchange = e => img.src = URL.createObjectURL(e.target.files[0]);
 
-        function onOpenCvReady() {
-            document.getElementById('status').innerText = 'Bereit zur Analyse';
-            document.getElementById('status').style.color = '#4CAF50';
-            inputElement.disabled = false;
-        }
-
-        inputElement.addEventListener('change', (e) => {
-            imgElement.src = URL.createObjectURL(e.target.files[0]);
-        });
-
-        imgElement.onload = () => { processBtn.disabled = false; };
-
-        function orderPoints(pts) {
-            let rect = new Array(4);
-            let s = pts.map(p => p.x + p.y);
-            let d = pts.map(p => p.x - p.y);
-            rect[0] = pts[s.indexOf(Math.min(...s))]; // TL
-            rect[2] = pts[s.indexOf(Math.max(...s))]; // BR
-            rect[1] = pts[d.indexOf(Math.max(...d))]; // TR
-            rect[3] = pts[d.indexOf(Math.min(...d))]; // BL
-            return rect;
-        }
-
-        processBtn.addEventListener('click', () => {
-            let src = cv.imread(imgElement);
-            let gray = new cv.Mat();
-            let bw = new cv.Mat();
+        $('u-btn').onclick = () => {
+            let src = cv.imread(img), gray = new cv.Mat(), bw = new cv.Mat();
             
-            // --- 1. SCHUTZ DÜNNER LINIEN ---
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+            // 1. MAX CONTRAST (Handy-App Effekt)
+            // Wir skalieren die Helligkeit/Kontrast massiv hoch (Alpha 1.5, Beta -50)
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            cv.convertScaleAbs(gray, gray, 1.6, -40); 
+            cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
             
-            // Weichzeichner gegen Bildrauschen
-            let ksize = new cv.Size(5, 5);
-            cv.GaussianBlur(gray, gray, ksize, 0, 0, cv.BORDER_DEFAULT);
+            // Aggressiver Threshold für klare Kanten
+            cv.adaptiveThreshold(gray, bw, 255, 1, 1, 35, 2);
 
-            // Sensibler Threshold (C=3 statt 10)
-            cv.adaptiveThreshold(gray, bw, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 31, 3);
-
-            // Dilation: Verdickt weiße Pixel (Linien), um Lücken zu schließen
-            let M_dil = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
-            cv.dilate(bw, bw, M_dil, new cv.Point(-1, -1), 1);
-
-            // --- 2. TARGET DETECTION & WARP ---
-            let contours = new cv.MatVector();
-            let hierarchy = new cv.Mat();
-            cv.findContours(bw, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-            let maxArea = 0, maxIdx = -1;
-            for (let i = 0; i < contours.size(); i++) {
-                let area = cv.contourArea(contours.get(i));
-                if (area > maxArea) { maxArea = area; maxIdx = i; }
+            // 2. WARP LOGIK (Stabilisiert)
+            let cnts = new cv.MatVector(), hier = new cv.Mat();
+            cv.findContours(bw, cnts, hier, 0, 2);
+            let maxA=0, maxI=-1;
+            for(let i=0; i<cnts.size(); i++) {
+                let a = cv.contourArea(cnts.get(i));
+                if(a > maxA) { maxA=a; maxI=i; }
             }
+            if(maxI < 0) return alert("Scheibe nicht erkannt");
 
-            if (maxIdx === -1) { alert("Kein Zielring erkannt!"); return; }
+            let rot = cv.minAreaRect(cnts.get(maxI)), pts = cv.RotatedRect.points(rot);
+            // Ecken sortieren (Top-Left, Top-Right, Bottom-Right, Bottom-Left)
+            pts.sort((a,b) => a.y - b.y);
+            let tl = pts[0].x < pts[1].x ? pts[0] : pts[1], tr = pts[0].x < pts[1].x ? pts[1] : pts[0];
+            let bl = pts[2].x < pts[3].x ? pts[2] : pts[3], br = pts[2].x < pts[3].x ? pts[3] : pts[2];
 
-            let rotatedRect = cv.minAreaRect(contours.get(maxIdx));
-            let vertices = cv.RotatedRect.points(rotatedRect);
-            let orderedPts = orderPoints([{x:vertices[0].x, y:vertices[0].y},{x:vertices[1].x, y:vertices[1].y},{x:vertices[2].x, y:vertices[2].y},{x:vertices[3].x, y:vertices[3].y}]);
-
-            let warpSize = 800;
-            let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [orderedPts[0].x, orderedPts[0].y, orderedPts[1].x, orderedPts[1].y, orderedPts[2].x, orderedPts[2].y, orderedPts[3].x, orderedPts[3].y]);
-            let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, warpSize, 0, warpSize, warpSize, 0, warpSize]);
-            let M_warp = cv.getPerspectiveTransform(srcTri, dstTri);
+            let sz = 1000, out = new cv.Mat(), mG = new cv.Mat(), mB = new cv.Mat();
+            let sT = cv.matFromArray(4, 1, cv.CV_32FC2, [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]);
+            let dT = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, sz, 0, sz, sz, 0, sz]);
+            let M_w = cv.getPerspectiveTransform(sT, dT);
             
-            let warpedOutput = new cv.Mat();
-            cv.warpPerspective(src, warpedOutput, M_warp, new cv.Size(warpSize, warpSize));
+            cv.warpPerspective(src, out, M_w, new cv.Size(sz, sz));
+            cv.warpPerspective(gray, mG, M_w, new cv.Size(sz, sz));
+            // Zweiten Threshold auf dem planen Bild
+            cv.adaptiveThreshold(mG, mB, 255, 1, 1, 21, 5);
+
+            // 3. RADIALE ANALYSE (Zentrum-fokussiert)
+            let wCnt = new cv.MatVector(), sc=0, ht=0, rings=parseInt($('u-r').value);
+            let mid = sz/2, maxR = sz/2, rW = maxR / rings;
+            cv.findContours(mB, wCnt, hier, 1, 2);
             
-            let warpedGray = new cv.Mat();
-            cv.warpPerspective(gray, warpedGray, M_warp, new cv.Size(warpSize, warpSize));
+            for(let i=0; i<wCnt.size(); i++){
+                let c = wCnt.get(i), a = cv.contourArea(c), p = cv.arcLength(c, true);
+                if(a < 30 || a > (sz*sz*0.4)) continue; // Ignoriere Rauschen & die ganze Scheibe
 
-            // --- 3. LOCHERKENNUNG ---
-            let warpedBw = new cv.Mat();
-            cv.adaptiveThreshold(warpedGray, warpedBw, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 25, 4);
+                let m = cv.moments(c), cx = m.m10/m.m00, cy = m.m01/m.m00;
+                let d = Math.hypot(cx-mid, cy-mid);
+                if(d > maxR * 0.98) continue; // Ignoriere Dinge am alleräußersten Rand
 
-            let n_rings = parseInt(document.getElementById('ringsInput').value);
-            let center = warpSize / 2;
-            let ringW = center / n_rings;
+                // FORM-CHECK: Circularity = 4*PI*Area / Perimeter^2
+                let circ = (4 * Math.PI * a) / (p * p);
 
-            let wContours = new cv.MatVector();
-            cv.findContours(warpedBw, wContours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+                // LOGIK:
+                // 1. Wenn es fast ein perfekter Kreis ist UND sehr groß -> Wahrscheinlich ein Ring-Rand
+                if(circ > 0.85 && a > 1000) continue; 
 
-            let score = 0, hits = 0;
-            for (let i = 0; i < wContours.size(); i++) {
-                let cnt = wContours.get(i);
-                let area = cv.contourArea(cnt);
-                if (area < 15 || area > 5000) continue; // Rauschfilter & Riesenobjekte
-
-                let mom = cv.moments(cnt);
-                let cx = mom.m10 / mom.m00, cy = mom.m01 / mom.m00;
-                let dist = Math.sqrt((cx - center)**2 + (cy - center)**2);
-                if (dist > center) continue;
-
-                // Achsen-Check (Zahlen ignorieren)
-                let tol = center * 0.06;
-                if (Math.abs(cy - center) < tol || Math.abs(cx - center) < tol) {
-                    cv.drawContours(warpedOutput, wContours, i, [255, 255, 0, 255], 2);
+                // 2. ZAHLEN-FILTER: Zahlen liegen oft auf einem Radius, der genau zwischen den Ringen ist.
+                // Und sie sind meistens "unrund" (circ < 0.5)
+                let onRingLine = Math.abs((d % rW)) < (rW * 0.15); // Nah an einer Ring-Linie?
+                
+                if(onRingLine && circ < 0.6) {
+                    cv.drawContours(out, wCnt, i, [255,255,0,255], 2); // Gelb = Zahl/Ignoriert
                 } else {
-                    cv.drawContours(warpedOutput, wContours, i, [255, 0, 0, 255], -1);
-                    score += Math.max(0, n_rings - Math.floor(dist / ringW));
-                    hits++;
+                    // 3. EINSCHUSSLOCH: Alles andere im Zielbereich
+                    cv.drawContours(out, wCnt, i, [255,0,0,255], -1); // Rot = Treffer
+                    cv.drawContours(out, wCnt, i, [255,255,255,255], 2);
+                    sc += Math.max(0, rings - Math.floor(d/rW));
+                    ht++;
                 }
             }
-
-            // Ringe zur Kontrolle zeichnen
-            for(let j=1; j<=n_rings; j++) cv.circle(warpedOutput, new cv.Point(center, center), ringW*j, [0, 200, 255, 255], 1);
-
-            cv.imshow('outputCanvas', warpedOutput);
-            document.getElementById('totalScore').innerText = score;
-            document.getElementById('hitCount').innerText = hits;
-            document.getElementById('scorePanel').style.display = 'block';
-
-            // Cleanup
-            src.delete(); gray.delete(); bw.delete(); M_dil.delete(); contours.delete(); hierarchy.delete();
-            srcTri.delete(); dstTri.delete(); M_warp.delete(); warpedOutput.delete(); warpedGray.delete(); warpedBw.delete(); wContours.delete();
-        });
+            
+            // Ringe zur Kontrolle (Blau)
+            for(let r=1; r<=rings; r++) cv.circle(out, new cv.Point(mid,mid), rW*r, [0,150,255,255], 1);
+            
+            cv.imshow('canvas', out);
+            $('s-tot').innerText=sc; $('s-hit').innerText=ht; $('score-card').style.display='block';
+            [src,gray,bw,cnts,hier,out,mG,mB,sT,dT,M_w,wCnt].forEach(m => m.delete());
+        };
     </script>
 </body>
 </html>
-
