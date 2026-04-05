@@ -3,65 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Target Scanner Pro - Geometrie Edition</title>
+    <title>Target Scanner Pro v3</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .container { width: 100%; max-width: 1200px; background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        h1 { color: #1a73e8; margin-top: 0; border-bottom: 2px solid #e8f0fe; padding-bottom: 10px; }
-        .top-bar { display: flex; gap: 20px; flex-wrap: wrap; background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; align-items: center; border: 1px solid #dee2e6; }
+        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: #e0e0e0; margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: auto; background: #1e1e1e; padding: 25px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+        .top-bar { display: flex; gap: 15px; flex-wrap: wrap; background: #2c2c2c; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #3d3d3d; }
         .control-group { display: flex; flex-direction: column; gap: 5px; }
-        label { font-size: 0.85rem; font-weight: bold; color: #5f6368; }
-        input, button { padding: 10px; border-radius: 5px; border: 1px solid #dadce0; }
-        button { background: #1a73e8; color: white; border: none; font-weight: bold; cursor: pointer; transition: background 0.2s; }
-        button:hover { background: #1557b0; }
-        button:disabled { background: #ccc; }
-        .main-layout { display: grid; grid-template-columns: 1fr 300px; gap: 30px; }
-        canvas { width: 100%; height: auto; background: #333; border-radius: 8px; border: 4px solid #fff; box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
-        .sidebar { background: #ffffff; border: 1px solid #dadce0; border-radius: 10px; padding: 20px; }
-        .score-big { font-size: 3rem; font-weight: bold; text-align: center; color: #202124; margin: 10px 0; }
-        .hit-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #f1f3f4; font-size: 0.9rem; }
-        .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.8rem; }
-        .badge-red { background: #fce8e6; color: #d93025; }
-        .badge-yellow { background: #fef7e0; color: #f9ab00; }
-        #status { color: #1a73e8; font-weight: bold; margin-bottom: 15px; }
+        input, button { padding: 12px; border-radius: 6px; border: 1px solid #444; background: #333; color: white; }
+        button { background: #007bff; border: none; cursor: pointer; font-weight: bold; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #555; }
+        .main-layout { display: grid; grid-template-columns: 1fr 350px; gap: 20px; }
+        canvas { width: 100%; border-radius: 8px; background: #000; display: block; }
+        .sidebar { background: #252525; border-radius: 10px; padding: 20px; border: 1px solid #333; }
+        .score-big { font-size: 4rem; font-weight: bold; text-align: center; color: #00ff88; margin: 10px 0; }
+        .hit-list { max-height: 400px; overflow-y: auto; margin-top: 20px; }
+        .hit-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #333; }
+        #status { color: #007bff; margin-bottom: 15px; text-align: center; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🎯 Target Scanner Pro</h1>
-    <div id="status">Warte auf OpenCV...</div>
-
+    <div id="status">Warte auf OpenCV.js...</div>
+    
     <div class="top-bar">
         <div class="control-group">
-            <label>Bildquelle</label>
+            <label>Bild wählen</label>
             <input type="file" id="fileInput" accept="image/*" disabled>
         </div>
         <div class="control-group">
-            <label>Ringe (Anzahl)</label>
-            <input type="number" id="ringCount" value="10" min="1" max="15">
+            <label>Ringe</label>
+            <input type="number" id="ringCount" value="10">
         </div>
         <div class="control-group">
-            <label>Achsen-Toleranz (px)</label>
-            <input type="number" id="tolerance" value="25" min="5" max="100">
+            <label>Achsen-Toleranz</label>
+            <input type="number" id="tolerance" value="25">
         </div>
-        <button id="processBtn" disabled>Scan starten</button>
+        <button id="processBtn" disabled>SCAN STARTEN</button>
     </div>
 
     <div class="main-layout">
-        <div class="view">
-            <canvas id="outputCanvas"></canvas>
-        </div>
+        <canvas id="outputCanvas"></canvas>
         <div class="sidebar">
-            <h3 style="margin-top:0">Ergebnis</h3>
+            <h3 style="text-align:center; margin:0;">PUNKTE</h3>
             <div class="score-big" id="totalScore">0</div>
-            <div style="text-align:center; color:#70757a; margin-bottom:20px;">GESAMTPUNKTE</div>
-            <div id="hitList"></div>
+            <div id="hitList" class="hit-list"></div>
         </div>
     </div>
 </div>
 
 <canvas id="hiddenCanvas" style="display:none;"></canvas>
+
 <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="cvReady()"></script>
 
 <script>
@@ -69,7 +62,7 @@ let isReady = false;
 const statusEl = document.getElementById('status');
 
 function cvReady() {
-    statusEl.innerText = "OpenCV geladen. Bereit zum Scan.";
+    statusEl.innerText = "OpenCV BEREIT";
     document.getElementById('fileInput').disabled = false;
     isReady = true;
 }
@@ -81,10 +74,14 @@ document.getElementById('fileInput').onchange = function(e) {
         img.onload = function() {
             let canvas = document.getElementById('hiddenCanvas');
             let ctx = canvas.getContext('2d');
-            let scale = Math.min(1000 / img.width, 1);
+            
+            // Verhindert das 2-Pixel-Problem: Skaliere auf max 1200px Breite
+            let scale = Math.min(1200 / img.width, 1);
             canvas.width = img.width * scale;
             canvas.height = img.height * scale;
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            
+            statusEl.innerText = "Bild geladen (" + canvas.width + "x" + canvas.height + " px)";
             document.getElementById('processBtn').disabled = false;
         }
         img.src = event.target.result;
@@ -93,108 +90,113 @@ document.getElementById('fileInput').onchange = function(e) {
 };
 
 document.getElementById('processBtn').onclick = function() {
-    const src = cv.imread('hiddenCanvas');
-    const dst = src.clone();
-    const gray = new cv.Mat();
-    const binary = new cv.Mat();
+    if(!isReady) return;
     
+    const src = cv.imread('hiddenCanvas');
+    let dst = new cv.Mat();
+    let gray = new cv.Mat();
+    let binary = new cv.Mat();
+    
+    // 1. Vorverarbeitung
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-    cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
+    
+    // Stärkerer Filter gegen Papier-Rauschen
+    cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 25, 10);
+
+    // NEU: Noise-Cancellation (Löscht alles unter 3x3 Pixel)
+    let M_noise = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+    cv.morphologyEx(binary, binary, cv.MORPH_OPEN, M_noise);
 
     let contours = new cv.MatVector();
     let hierarchy = new cv.Mat();
     cv.findContours(binary, contours, hierarchy, cv.RETR_CCOMP, cv.CHAIN_APPROX_SIMPLE);
 
-    // 1. Zentrum finden (Größter runder Ring)
+    // 2. Zentrum finden
     let center = null;
     let maxR = 0;
     for (let i = 0; i < contours.size(); ++i) {
         let cnt = contours.get(i);
         let area = cv.contourArea(cnt);
-        if (area < 1000) continue;
+        if (area < 2000) continue;
         let circle = cv.minEnclosingCircle(cnt);
-        let circularity = (4 * Math.PI * area) / (cv.arcLength(cnt, true) ** 2);
-        if (circularity > 0.5 && circle.radius > maxR) {
+        let perimeter = cv.arcLength(cnt, true);
+        let circularity = (4 * Math.PI * area) / (perimeter * perimeter);
+        if (circularity > 0.6 && circle.radius > maxR) {
             maxR = circle.radius;
             center = circle.center;
         }
     }
 
-    if (!center) { alert("Scheibe nicht erkannt!"); return; }
+    if (!center) { 
+        alert("Konnte Schießscheibe nicht finden. Achte auf guten Kontrast!"); 
+        return; 
+    }
 
-    // Hilfswerte
+    // Visualisierung vorbereiten
+    src.copyTo(dst);
     const ringQty = parseInt(document.getElementById('ringCount').value);
     const tol = parseInt(document.getElementById('tolerance').value);
     const ringW = maxR / ringQty;
     let hits = [];
     let numberData = [];
 
-    // 2. Loop durch alle Formen
+    // 3. Analyse der Formen
     for (let i = 0; i < contours.size(); ++i) {
         let cnt = contours.get(i);
         let area = cv.contourArea(cnt);
-        if (area < 20 || area > (maxR * maxR)) continue;
+        
+        // Ignoriere winzige Punkte (Staub/Papierfasern)
+        if (area < 80 || area > (maxR * maxR * 0.4)) continue;
 
-        let M = cv.moments(cnt);
-        let cx = M.m10 / M.m00;
-        let cy = M.m01 / M.m00;
+        let moments = cv.moments(cnt);
+        let cx = moments.m10 / moments.m00;
+        let cy = moments.m01 / moments.m00;
         let dist = Math.sqrt((cx - center.x)**2 + (cy - center.y)**2);
-        if (dist > maxR) continue;
+        
+        if (dist > maxR + 10) continue;
 
         let onAxis = (Math.abs(cx - center.x) < tol || Math.abs(cy - center.y) < tol);
 
         if (onAxis) {
-            numberData.push({ area, cx, cy, dist, ring: Math.floor(dist / ringW), idx: i });
-            cv.drawContours(dst, contours, i, [0, 255, 0, 255], 1);
+            numberData.push({ area, cx, cy, dist, ring: Math.floor(dist / ringW) });
+            cv.drawContours(dst, contours, i, [0, 255, 0, 255], 2);
         } else {
             let circ = (4 * Math.PI * area) / (cv.arcLength(cnt, true) ** 2);
-            if (circ > 0.3) {
-                hits.push({ dist, score: Math.max(0, 10 - Math.floor(dist / ringW)), type: 'Direkt' });
-                cv.circle(dst, new cv.Point(cx, cy), 8, [255, 0, 0, 255], 2);
+            // Ein Loch muss runder sein als nur Rauschen
+            if (circ > 0.45) {
+                hits.push({ dist, score: Math.max(0, 11 - Math.floor(dist / ringW + 1)) });
+                cv.circle(dst, new cv.Point(cx, cy), 12, [255, 0, 0, 255], 3);
             }
         }
     }
 
-    // 3. Flächen-Abgleich (Der "8er" Fix)
-    // Wir gruppieren nach Ringen und nutzen den Median der Flächen
-    let groups = {};
-    numberData.forEach(n => {
-        if (!groups[n.ring]) groups[n.ring] = [];
-        groups[n.ring].push(n);
-    });
-
-    for (let r in groups) {
-        let sorted = groups[r].sort((a, b) => a.area - b.area);
-        let medianArea = sorted[Math.floor(sorted.length / 2)].area;
-        
-        sorted.forEach(n => {
-            // Ein Loch muss die Fläche extrem verändern (Faktor 2.2 statt 1.5)
-            // Oder die Zahl ist durch das Loch extrem klein geworden (Faktor 0.4)
-            if (n.area > medianArea * 2.2 || n.area < medianArea * 0.4) {
-                hits.push({ dist: n.dist, score: Math.max(0, 10 - Math.floor(n.dist / ringW)), type: 'Korrektur' });
-                cv.circle(dst, new cv.Point(n.cx, n.cy), 10, [255, 255, 0, 255], 2);
+    // 4. Sonderfall: Flächen-Korrektur (Median)
+    if(numberData.length > 0) {
+        let medianArea = numberData.map(n => n.area).sort((a,b)=>a-b)[Math.floor(numberData.length/2)];
+        numberData.forEach(n => {
+            if (n.area > medianArea * 2.1 || n.area < medianArea * 0.45) {
+                hits.push({ dist: n.dist, score: Math.max(0, 11 - Math.floor(n.dist / ringW + 1)) });
+                cv.circle(dst, new cv.Point(n.cx, n.cy), 15, [255, 255, 0, 255], 3);
             }
         });
     }
 
-    // Anzeige
-    cv.circle(dst, center, maxR, [255, 0, 0, 255], 2);
+    // Endergebnis zeichnen
+    cv.circle(dst, center, maxR, [255, 0, 0, 255], 3);
     cv.imshow('outputCanvas', dst);
     
-    // Scoreboard
+    // Sidebar Update
     let total = 0;
-    let listHtml = "";
-    hits.forEach((h, i) => {
+    let html = "";
+    hits.sort((a,b) => b.score - a.score).forEach((h, i) => {
         total += h.score;
-        listHtml += `<div class="hit-item">
-            <span>Treffer ${i+1} <span class="badge ${h.type=='Direkt'?'badge-red':'badge-yellow'}">${h.type}</span></span>
-            <strong>${h.score} Pkt</strong>
-        </div>`;
+        html += `<div class="hit-item"><span>Treffer ${i+1}</span> <strong>${h.score} Ringe</strong></div>`;
     });
     document.getElementById('totalScore').innerText = total;
-    document.getElementById('hitList').innerHTML = listHtml;
+    document.getElementById('hitList').innerHTML = html;
 
-    src.delete(); dst.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete();
+    // Speicher freigeben
+    src.delete(); dst.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete(); M_noise.delete();
 };
 </script>
 </body>
