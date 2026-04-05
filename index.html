@@ -2,22 +2,23 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TargetScan V24 - MSER Region Detection</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TargetScan V25 - Stability Fix</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
     <style>
-        body { font-family: sans-serif; background: #111; color: white; padding: 10px; display: flex; flex-direction: column; align-items: center; }
+        body { font-family: sans-serif; background: #111; color: white; padding: 10px; display: flex; flex-direction: column; align-items: center; margin: 0; }
         #app-container { width: 100%; max-width: 500px; }
-        .card { background: #222; padding: 12px; border-radius: 12px; margin-bottom: 8px; border: 1px solid #444; width: 100%; box-sizing: border-box;}
-        video, canvas { width: 100%; border-radius: 10px; background: #000; margin-top: 5px; }
+        .card { background: #222; padding: 12px; border-radius: 12px; margin-bottom: 8px; border: 1px solid #444; box-sizing: border-box; width: 100%; }
+        video, canvas { width: 100%; border-radius: 10px; background: #000; display: block; margin-top: 5px; }
         .hidden { display: none; }
-        button { width: 100%; padding: 15px; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; border: none; margin-top: 5px; }
+        button { width: 100%; padding: 18px; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; border: none; margin-top: 10px; }
         #scan-btn { background: #4caf50; color: white; }
+        #scan-btn:disabled { background: #444; color: #888; }
         .input-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.8em; }
         .input-group { display: flex; flex-direction: column; }
-        input { background: #333; color: white; border: 1px solid #555; padding: 4px; border-radius: 4px; }
-        #status { text-align: center; color: #ffeb3b; margin: 8px 0; font-weight: bold; font-size: 0.9em; }
-        h4 { margin: 10px 0 2px 0; font-size: 0.8em; color: #aaa; text-transform: uppercase; }
+        input { background: #333; color: white; border: 1px solid #555; padding: 6px; border-radius: 4px; }
+        #status { text-align: center; color: #ffeb3b; margin: 10px 0; font-size: 0.9em; font-weight: bold; min-height: 1.2em; }
+        h4 { margin: 12px 0 4px 0; font-size: 0.8em; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
     </style>
 </head>
 <body>
@@ -26,18 +27,18 @@
         <div class="card">
             <div class="input-grid">
                 <div class="input-group"><label>Ringe (z.B. 6):</label><input type="number" id="ring-count" value="6"></div>
-                <div class="input-group"><label>Loch-Kontrast:</label><input type="number" id="mser-delta" value="5"></div>
-                <div class="input-group"><label>Min Fläche (Pixel):</label><input type="number" id="min-area" value="150"></div>
-                <div class="input-group"><label>Max Fläche (Pixel):</label><input type="number" id="max-area" value="3500"></div>
+                <div class="input-group"><label>Loch-Kontrast:</label><input type="number" id="mser-delta" value="8"></div>
+                <div class="input-group"><label>Min Fläche:</label><input type="number" id="min-area" value="180"></div>
+                <div class="input-group"><label>Max Fläche:</label><input type="number" id="max-area" value="4000"></div>
             </div>
-            <div id="status">Warte auf OpenCV...</div>
+            <div id="status">Warte auf Kamera...</div>
         </div>
 
         <video id="camera-view" autoplay playsinline></video>
         <canvas id="output-canvas" class="hidden"></canvas>
         
         <div id="debug-area" class="hidden">
-            <h4>Detektierte Regionen</h4>
+            <h4>Analyse-Ansicht (MSER Regions)</h4>
             <canvas id="debug-canvas"></canvas>
         </div>
         
@@ -57,82 +58,109 @@
         const status = document.getElementById('status');
 
         let cvReady = false;
+
         function onOpenCvReady() {
             cvReady = true;
-            status.innerText = "Bereit";
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } })
-                .then(s => { video.srcObject = s; video.onloadedmetadata = () => { scanBtn.disabled = false; }; });
+            initCamera();
+        }
+
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
+                });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    video.play();
+                    status.innerText = "System bereit";
+                    scanBtn.disabled = false;
+                };
+            } catch (err) {
+                status.innerText = "Kamera-Fehler: " + err.message;
+            }
         }
 
         scanBtn.addEventListener('click', async () => {
-            if (!cvReady || video.videoWidth === 0) return;
-            scanBtn.disabled = true; status.innerText = "Suche Scheibe...";
-            await new Promise(r => setTimeout(r, 100));
+            if (!cvReady || video.readyState < 2) return;
+            
+            scanBtn.disabled = true;
+            status.innerText = "Verarbeite Bild...";
+            await new Promise(r => setTimeout(r, 200));
+
+            // FIX: Größen explizit zum Zeitpunkt des Klicks holen
+            const vW = video.videoWidth;
+            const vH = video.videoHeight;
+            
+            let src, gray, blurred, circles, target, gray600, msContours, bboxes, debugMask;
 
             try {
-                let src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
-                new cv.VideoCapture(video).read(src);
+                src = new cv.Mat(vH, vW, cv.CV_8UC4);
+                let cap = new cv.VideoCapture(video);
+                cap.read(src);
 
-                let gray = new cv.Mat();
-                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+                gray = new cv.Mat();
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
                 
-                // 1. Scheibe finden (Hough)
-                let blurred = new cv.Mat();
+                // 1. Scheibe finden
+                blurred = new cv.Mat();
                 cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 0);
-                let circles = new cv.Mat();
+                circles = new cv.Mat();
                 cv.HoughCircles(blurred, circles, cv.HOUGH_GRADIENT, 1, 100, 50, 35, 100, 0);
 
-                if (circles.cols === 0) throw new Error("Keine Scheibe erkannt.");
+                if (circles.cols === 0) throw new Error("Keine Scheibe gefunden. Halte die Kamera ruhiger.");
 
                 let tx = circles.data32F[0], ty = circles.data32F[1], tr = circles.data32F[2];
                 let rect = new cv.Rect(tx - tr, ty - tr, tr * 2, tr * 2);
-                rect.x = Math.max(0, rect.x); rect.y = Math.max(0, rect.y);
-                rect.width = Math.min(src.cols - rect.x, rect.width); rect.height = Math.min(src.rows - rect.y, rect.height);
                 
-                let target = new cv.Mat();
+                // Boundary Check für den Crop
+                rect.x = Math.max(0, Math.min(rect.x, vW - 1));
+                rect.y = Math.max(0, Math.min(rect.y, vH - 1));
+                rect.width = Math.min(rect.width, vW - rect.x);
+                rect.height = Math.min(rect.height, vH - rect.y);
+                
+                target = new cv.Mat();
                 cv.resize(src.roi(rect), target, new cv.Size(600, 600), 0, 0, cv.INTER_AREA);
-                let gray600 = new cv.Mat();
-                cv.cvtColor(target, gray600, cv.COLOR_RGBA2GRAY, 0);
+                gray600 = new cv.Mat();
+                cv.cvtColor(target, gray600, cv.COLOR_RGBA2GRAY);
 
-                // 2. MSER (Maximally Stable Extremal Regions)
-                // Sucht nach stabilen dunklen Flecken auf hellem Grund
+                // 2. MSER Erkennung
                 let mser = new cv.MSER(
-                    parseInt(document.getElementById('mser-delta').value), // Delta
-                    parseInt(document.getElementById('min-area').value),  // Min Area
-                    parseInt(document.getElementById('max-area').value)   // Max Area
+                    parseInt(document.getElementById('mser-delta').value),
+                    parseInt(document.getElementById('min-area').value),
+                    parseInt(document.getElementById('max-area').value),
+                    0.25, 0.2, 200, 1.01, 0.003, 5 // Erweiterte Stabilitätsparameter
                 );
 
-                let msContours = new cv.MatVector();
-                let bboxes = new cv.RectVector();
+                msContours = new cv.MatVector();
+                bboxes = new cv.RectVector();
                 mser.detectRegions(gray600, msContours, bboxes);
 
                 let treffer = [];
                 let ringCount = parseInt(document.getElementById('ring-count').value);
                 let ringWidth = 300 / ringCount;
-                let debugMask = cv.Mat.zeros(600, 600, cv.CV_8UC3);
+                debugMask = cv.Mat.zeros(600, 600, cv.CV_8UC3);
 
                 for (let i = 0; i < msContours.size(); ++i) {
                     let cnt = msContours.get(i);
-                    let rect = bboxes.get(i);
+                    let r = bboxes.get(i);
                     
-                    // Filter: Ein Einschussloch ist kompakt (Breite/Höhe Verhältnis)
-                    let aspect = rect.width / rect.height;
-                    if (aspect > 0.5 && aspect < 2.0) {
+                    // Filter: Nur kompakte Objekte (schließt lange Linien aus)
+                    let aspect = r.width / r.height;
+                    if (aspect > 0.6 && aspect < 1.6) {
                         let M = cv.moments(cnt);
                         if (M.m00 > 0) {
                             let cx = M.m10 / M.m00;
                             let cy = M.m01 / M.m00;
                             let dist = Math.hypot(cx - 300, cy - 300);
 
-                            // Zentrums-Filter (verhindert das Erkennen der weißen 10)
-                            if (dist < 40 && rect.width > 80) continue;
+                            // Ignoriere zu große Objekte im Zentrum (Weißes Zentrum Problem)
+                            if (dist < 50 && r.width > 120) continue;
 
-                            let punkte = 10 - Math.floor(dist / ringWidth);
-                            treffer.push(Math.max(10 - ringCount + 1, Math.min(10, punkte)));
+                            let p = 10 - Math.floor(dist / ringWidth);
+                            treffer.push(Math.max(10 - ringCount + 1, Math.min(10, p)));
 
-                            // Zeichnen auf dem Original und dem Debug
                             cv.circle(target, new cv.Point(cx, cy), 15, [0, 255, 0, 255], 3);
-                            cv.drawContours(debugMask, msContours, i, [255, 255, 255, 255], -1);
+                            cv.drawContours(debugMask, msContours, i, [0, 255, 255, 255], 1);
                         }
                     }
                 }
@@ -145,32 +173,28 @@
                 document.getElementById('debug-area').classList.remove('hidden');
                 document.getElementById('result-panel').classList.remove('hidden');
                 zeige(treffer);
-                status.innerText = "MSER-Analyse abgeschlossen";
+                status.innerText = "Fertig!";
                 document.getElementById('reset-btn').classList.remove('hidden');
 
-                // Cleanup
-                [src, gray, blurred, circles, target, gray600, debugMask, msContours, bboxes].forEach(m => { if(m) m.delete(); });
             } catch (e) {
                 status.innerText = "Fehler: " + e.message;
+                console.error(e);
                 scanBtn.disabled = false;
+            } finally {
+                // Cleanup aller Mats
+                [src, gray, blurred, circles, target, gray600, debugMask, msContours, bboxes].forEach(m => { if(m) m.delete(); });
             }
         });
 
         function zeige(t) {
             const l = document.getElementById('results-list');
             l.innerHTML = ""; let s = 0;
-            // Entferne Duplikate durch Überlagerung (MSER findet oft Regionen in Regionen)
-            let uniqueTreffer = [];
-            t.sort((a,b) => b-a).forEach(p => { 
-                // Einfache Logik: Wir begrenzen die Anzahl der Treffer auf ein realistisches Maß
-                uniqueTreffer.push(p);
-            });
-            
-            uniqueTreffer.slice(0, 15).forEach(p => { 
-                l.innerHTML += `<div class="result-row"><span>Ring ${p}</span><span>1x</span></div>`;
+            // Da MSER oft geschachtelte Regionen findet, nehmen wir nur die besten Treffer
+            t.sort((a,b) => b-a).slice(0, 12).forEach(p => { 
+                l.innerHTML += `<div class="result-row" style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #333;"><span>Ring ${p}</span><span>1x</span></div>`;
                 s += p;
             });
-            l.innerHTML += `<div class="result-row" style="font-weight:bold; color:#4caf50; font-size:1.2em;"><span>Gesamt</span><span>${s}</span></div>`;
+            l.innerHTML += `<div style="font-weight:bold; color:#4caf50; padding:10px 5px;">Gesamt: ${s} Punkte</div>`;
         }
         document.getElementById('reset-btn').onclick = () => location.reload();
     </script>
