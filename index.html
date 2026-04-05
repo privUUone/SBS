@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TargetScan V16</title>
+    <title>TargetScan V17 - Sliding Window</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
     <style>
         body { font-family: sans-serif; background: #111; color: white; padding: 15px; display: flex; flex-direction: column; align-items: center; }
@@ -50,7 +50,6 @@
         function onOpenCvReady() {
             cvReady = true;
             status.innerText = "Kamera wird geladen...";
-            // width: { ideal: 1280 } ist robuster bei mobilen Geräten
             navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } })
                 .then(s => { 
                     video.srcObject = s;
@@ -66,24 +65,24 @@
         const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
         scanBtn.addEventListener('click', async () => {
-            // Sicherstellen, dass das Video wirklich Dimensionen hat
-            if (!cvReady || video.videoWidth === 0 || video.videoHeight === 0) {
-                status.innerText = "Fehler: Videogröße noch nicht erkannt.";
-                return;
-            }
+            if (!cvReady || video.videoWidth === 0) return;
             
             scanBtn.disabled = true;
             status.innerText = "Schritt 1: Karte finden...";
             await sleep(100);
 
             try {
-                let vW = video.videoWidth;
-                let vH = video.videoHeight;
+                // FIX: Video-Attribute explizit setzen für OpenCV VideoCapture
+                video.width = video.videoWidth;
+                video.height = video.videoHeight;
+                let vW = video.width;
+                let vH = video.height;
+
                 let src = new cv.Mat(vH, vW, cv.CV_8UC4);
                 let cap = new cv.VideoCapture(video);
                 cap.read(src);
 
-                // 2. Kreis-Ortung (Vollbild)
+                // 2. Kreis-Ortung
                 let gray = new cv.Mat();
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
                 let blurred = new cv.Mat();
@@ -91,12 +90,10 @@
                 let circles = new cv.Mat();
                 cv.HoughCircles(blurred, circles, cv.HOUGH_GRADIENT, 1, 100, 50, 40, 100, vH/2);
 
-                if (circles.cols === 0) throw new Error("Kein Kreis gefunden! Bitte näher rangehen.");
+                if (circles.cols === 0) throw new Error("Kein Kreis gefunden!");
                 let tx = circles.data32F[0], ty = circles.data32F[1], tr = circles.data32F[2];
 
                 // 3. Crop & Square (512x512)
-                status.innerText = "Schritt 2: Histogramm-Analyse...";
-                await sleep(50);
                 let rect = new cv.Rect(tx - tr, ty - tr, tr * 2, tr * 2);
                 rect.x = Math.max(0, rect.x); rect.y = Math.max(0, rect.y);
                 rect.width = Math.min(src.cols - rect.x, rect.width);
@@ -106,111 +103,97 @@
                 let target = new cv.Mat();
                 cv.resize(cropped, target, new cv.Size(512, 512), 0, 0, cv.INTER_AREA);
 
-                // 4. Intelligente Farbanalyse
+                // 4. Histogramm & sliding Window
                 let gray512 = new cv.Mat();
                 cv.cvtColor(target, gray512, cv.COLOR_RGBA2GRAY, 0);
                 
-                // Exakte Maske für den Innenkreis (R=250)
                 let mask = cv.Mat.zeros(512, 512, cv.CV_8U);
-                cv.circle(mask, new cv.Point(256, 256), 250, new cv.Scalar(255, 255, 255, 255), -1);
-                
-                // Gesamtpixel im relevanten Kreis
+                cv.circle(mask, new cv.Point(256, 256), 250, [255, 255, 255, 255], -1);
                 let totalPx = Math.PI * 250 * 250; 
-                
-                // 256-Stufen Histogramm erstellen
+
                 let srcVec = new cv.MatVector(); 
-                srcVec.push_back(gray512); // WICHTIG: Hier muss das Graubild rein, nicht die Maske!
+                srcVec.push_back(gray512);
                 let hist = new cv.Mat();
                 cv.calcHist(srcVec, [0], mask, hist, [256], [0, 256]);
                 
-                // Histogramm-Daten auslesen und kopieren für die Bearbeitung
                 let histData = Array.from(hist.data32F);
                 let tempHist = [...histData]; 
 
+                // Schritt A: Hauptfarben (Karte) eliminieren
                 let cardCount = parseInt(document.getElementById('color-count').value);
-                
-                // Schritt A: Die Hauptfarben (Karte) finden und ignorieren (+/- 15 Graustufen)
                 for(let c = 0; c < cardCount; c++) {
                     let maxVal = 0, maxIdx = 0;
                     for(let i = 0; i < 256; i++) {
                         if(tempHist[i] > maxVal) { maxVal = tempHist[i]; maxIdx = i; }
                     }
-                    // Breiter Bereich für Hauptfarben ausblenden (z.B. Weiß / Schwarz)
+                    // Bereich +/- 15 Graustufen um Peak nullen
                     let start = Math.max(0, maxIdx - 15);
                     let end = Math.min(255, maxIdx + 15);
                     for(let i = start; i <= end; i++) tempHist[i] = 0; 
                 }
 
-                // Schritt B: Restliche Pixel nach "Loch-Bereichen" absuchen (max 5 Stufen)
+                // Schritt B: Sliding Window (5 Stufen) für Löcher
                 let holeRanges = [];
-                while(true) {
-                    let maxVal = 0, maxIdx = 0;
-                    for(let i = 0; i < 256; i++) {
-                        if(tempHist[i] > maxVal) { maxVal = tempHist[i]; maxIdx = i; }
-                    }
-                    if(maxVal === 0) break; // Nichts mehr da
+                let isHoleBin = new Array(256).fill(false);
 
-                    // Ein Bereich von 5 Stufen (Zentrum +/- 2)
-                    let start = Math.max(0, maxIdx - 2);
-                    let end = Math.min(255, maxIdx + 2);
+                for(let i = 0; i <= 255 - 4; i++) {
+                    let windowSum = 0;
+                    for(let j=0; j<5; j++) windowSum += tempHist[i+j];
                     
-                    let rangeSum = 0;
-                    for(let i = start; i <= end; i++) rangeSum += tempHist[i];
-
-                    // Wenn dieser 5er-Bereich mehr als 0,4% der Fläche ausmacht -> Es ist ein Loch!
-                    if((rangeSum / totalPx) > 0.004) {
-                        holeRanges.push({start, end});
+                    // Wenn 5er Fenster > 0.4% der Pixel im Kreis
+                    if ((windowSum / totalPx) > 0.004) {
+                        for(let j=0; j<5; j++) isHoleBin[i+j] = true;
                     }
-                    
-                    // Bereich nullen, um den nächsten Peak zu finden
-                    for(let i = start; i <= end; i++) tempHist[i] = 0;
+                }
+                
+                // Bereiche zusammenfassen
+                let startRange = -1;
+                for(let i = 0; i <= 256; i++) {
+                    if(i < 256 && isHoleBin[i]) {
+                        if(startRange === -1) startRange = i;
+                    } else {
+                        if(startRange !== -1) {
+                            holeRanges.push({start: startRange, end: i - 1});
+                            startRange = -1;
+                        }
+                    }
                 }
 
-                status.innerText = "Schritt 3: Treffer maskieren...";
-                await sleep(50);
-
-                // Loch-Maske generieren anhand der gefundenen Bereiche
+                // Loch-Maske erstellen
                 let holeMask = cv.Mat.zeros(512, 512, cv.CV_8U);
                 for(let r of holeRanges) {
-                    let temp = new cv.Mat();
+                    let tM = new cv.Mat();
                     let low = new cv.Mat(512, 512, cv.CV_8UC1, [r.start, 0, 0, 0]);
                     let high = new cv.Mat(512, 512, cv.CV_8UC1, [r.end, 0, 0, 0]);
-                    cv.inRange(gray512, low, high, temp);
-                    cv.bitwise_or(holeMask, temp, holeMask);
-                    
-                    temp.delete(); low.delete(); high.delete();
+                    cv.inRange(gray512, low, high, tM);
+                    cv.bitwise_or(holeMask, tM, holeMask);
+                    tM.delete(); low.delete(); high.delete();
                 }
-                // Maske streng auf den Kreis limitieren
                 cv.bitwise_and(holeMask, mask, holeMask);
 
-                // 5. Morphologie - Kleine Störpixel entfernen und Ränder glätten
+                // Morphologie
                 let k = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5, 5));
                 cv.morphologyEx(holeMask, holeMask, cv.MORPH_CLOSE, k);
 
-                status.innerText = "Schritt 4: Ringauswertung...";
-                await sleep(50);
-                
+                // Konturen & Ringe
                 let contours = new cv.MatVector();
                 let hierarchy = new cv.Mat();
                 cv.findContours(holeMask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
                 let treffer = [];
                 let rNum = parseInt(document.getElementById('ring-count').value);
-                let rStep = 250 / rNum; // 250 ist der Radius der Maske
+                let rStep = 250 / rNum;
 
                 for (let i = 0; i < contours.size(); ++i) {
                     let area = cv.contourArea(contours.get(i));
-                    if (area > 50) { // Mindestgröße eines Lochs in Pixeln
+                    if (area > 40) { 
                         let M = cv.moments(contours.get(i));
                         let cx = M.m10/M.m00, cy = M.m01/M.m00;
-                        // Distanz zum Zentrum (256, 256)
                         let d = Math.hypot(cx - 256, cy - 256);
-                        
                         let p = rNum - Math.floor(d / rStep);
-                        p = Math.max(1, Math.min(rNum, p)); // Clamp zwischen 1 und Max-Ring
-                        
+                        p = Math.max(1, Math.min(rNum, p));
                         treffer.push(p);
-                        cv.circle(target, new cv.Point(cx, cy), 12, [0, 255, 0, 255], 3); // Grüner Kreis für Treffer
+                        cv.circle(target, new cv.Point(cx, cy), 12, [0, 255, 0, 255], 3);
                     }
                 }
 
@@ -222,12 +205,13 @@
                 status.innerText = "Fertig!";
                 document.getElementById('reset-btn').style.display = 'block';
 
-                // Cleanup (Speicherlecks verhindern)
+                // Cleanup
                 [src, gray, blurred, circles, cropped, target, gray512, mask, hist, holeMask, k, contours, hierarchy].forEach(m => { if(m) m.delete(); });
                 srcVec.delete();
 
             } catch (e) {
                 status.innerText = "Fehler: " + e.message;
+                console.error(e);
                 scanBtn.disabled = false;
             }
         });
@@ -235,19 +219,16 @@
         function zeige(t) {
             const l = document.getElementById('results-list');
             l.innerHTML = "";
-            if(t.length === 0) {
-                l.innerHTML = `<div class="res" style="color:#ff9800; justify-content:center;">Keine Treffer erkannt</div>`;
-                return;
-            }
             let s = 0;
             t.sort((a,b) => b-a).forEach(p => { 
                 l.innerHTML += `<div class="res"><span>Ring ${p}</span><span>1x</span></div>`;
                 s += p;
             });
-            l.innerHTML += `<div class="res" style="font-weight:bold; color:#4caf50; font-size:22px; margin-top:10px;"><span>Gesamt</span><span>${s}</span></div>`;
+            l.innerHTML += `<div class="res" style="font-weight:bold; color:#4caf50;"><span>Gesamt</span><span>${s}</span></div>`;
         }
 
         document.getElementById('reset-btn').onclick = () => location.reload();
     </script>
 </body>
 </html>
+
