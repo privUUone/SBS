@@ -3,144 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SmartShot AI</title>
+    <title>SmartShot AI - High Precision</title>
     <style>
-        /* Dark-Mode Design */
-        body {
-            background-color: #121212;
-            color: #e0e0e0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        h1 { margin-top: 0; color: #ffffff; }
-        .controls {
-            background: #1e1e1e;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            margin-bottom: 20px;
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-        input[type="file"], input[type="number"] {
-            background: #2d2d2d;
-            color: #fff;
-            border: 1px solid #444;
-            padding: 8px;
-            border-radius: 4px;
-        }
-        button {
-            background: #007acc;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: background 0.2s;
-        }
-        button:hover:not(:disabled) { background: #005f9e; }
-        button:disabled { background: #555; cursor: not-allowed; }
-        
-        .workspace {
-            position: relative;
-            display: inline-block;
-        }
-        canvas {
-            max-width: 100%;
-            border: 2px solid #333;
-            border-radius: 4px;
-            background: #000;
-        }
-        /* Semitransparentes Score-Panel (Top-Left) */
-        .score-panel {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 10px 15px;
-            border-radius: 8px;
-            border: 1px solid #444;
-            display: none;
-            flex-direction: column;
-        }
-        .score-panel h2 { margin: 0 0 5px 0; color: #4CAF50; font-size: 24px;}
-        .score-panel p { margin: 0; font-size: 14px; color: #aaa; }
-        
+        body { background-color: #121212; color: #e0e0e0; font-family: sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .controls { background: #1e1e1e; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
+        input, button { background: #2d2d2d; color: #fff; border: 1px solid #444; padding: 8px; border-radius: 4px; }
+        button { background: #007acc; cursor: pointer; font-weight: bold; }
+        button:disabled { background: #555; }
+        .workspace { position: relative; }
+        canvas { max-width: 100%; border: 2px solid #333; background: #000; }
+        .score-panel { position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.8); padding: 15px; border-radius: 8px; border: 1px solid #444; pointer-events: none; }
         #status { margin-bottom: 15px; font-weight: bold; color: #ff9800; }
     </style>
 </head>
 <body>
 
-    <h1>🎯 SmartShot AI</h1>
-    <div id="status">OpenCV.js wird geladen... Bitte warten.</div>
+    <h1>🎯 SmartShot AI (Warp & Dilation)</h1>
+    <div id="status">Lade OpenCV.js...</div>
 
     <div class="controls">
         <input type="file" id="imageInput" accept="image/*" disabled>
-        <div>
-            <label for="ringsInput">Anzahl Ringe:</label>
-            <input type="number" id="ringsInput" value="10" min="1" max="20" disabled>
-        </div>
-        <button id="processBtn" disabled>Bild analysieren</button>
+        <label>Ringe: <input type="number" id="ringsInput" value="10" min="1" max="20" style="width: 50px;"></label>
+        <button id="processBtn" disabled>Analyse starten</button>
     </div>
 
     <div class="workspace">
         <img id="imageSrc" style="display:none;">
         <canvas id="outputCanvas"></canvas>
-        <div class="score-panel" id="scorePanel">
-            <h2>Score: <span id="totalScore">0</span></h2>
-            <p>Treffer: <span id="hitCount">0</span></p>
+        <div class="score-panel" id="scorePanel" style="display:none;">
+            <div style="color: #4CAF50; font-size: 24px; font-weight: bold;">Score: <span id="totalScore">0</span></div>
+            <div style="color: #aaa;">Treffer: <span id="hitCount">0</span></div>
         </div>
     </div>
 
-    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady()" type="text/javascript"></script>
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady()"></script>
 
     <script>
         let imgElement = document.getElementById('imageSrc');
         let inputElement = document.getElementById('imageInput');
         let processBtn = document.getElementById('processBtn');
-        let ringsInput = document.getElementById('ringsInput');
-        
-        // UI aktivieren wenn OpenCV bereit ist
+
         function onOpenCvReady() {
-            document.getElementById('status').innerText = 'OpenCV ist bereit. Lade ein Bild hoch!';
+            document.getElementById('status').innerText = 'Bereit zur Analyse';
             document.getElementById('status').style.color = '#4CAF50';
             inputElement.disabled = false;
-            ringsInput.disabled = false;
         }
 
-        // Bild laden
         inputElement.addEventListener('change', (e) => {
             imgElement.src = URL.createObjectURL(e.target.files[0]);
-        }, false);
+        });
 
-        imgElement.onload = function() {
-            processBtn.disabled = false;
-            // Zeige das Originalbild im Canvas an, bevor verarbeitet wird
-            let mat = cv.imread(imgElement);
-            cv.imshow('outputCanvas', mat);
-            mat.delete();
-            document.getElementById('scorePanel').style.display = 'none';
-        };
+        imgElement.onload = () => { processBtn.disabled = false; };
 
-        // --- HILFSFUNKTION: Ecken sortieren für Perspective Warp ---
-        // minAreaRect gibt 4 Punkte in zufälliger Reihenfolge. Wir brauchen: TL, TR, BR, BL.
         function orderPoints(pts) {
             let rect = new Array(4);
             let s = pts.map(p => p.x + p.y);
             let d = pts.map(p => p.x - p.y);
-            
-            rect[0] = pts[s.indexOf(Math.min(...s))]; // Top-Left
-            rect[2] = pts[s.indexOf(Math.max(...s))]; // Bottom-Right
-            rect[1] = pts[d.indexOf(Math.max(...d))]; // Top-Right
-            rect[3] = pts[d.indexOf(Math.min(...d))]; // Bottom-Left
+            rect[0] = pts[s.indexOf(Math.min(...s))]; // TL
+            rect[2] = pts[s.indexOf(Math.max(...s))]; // BR
+            rect[1] = pts[d.indexOf(Math.max(...d))]; // TR
+            rect[3] = pts[d.indexOf(Math.min(...d))]; // BL
             return rect;
         }
 
@@ -149,154 +71,92 @@
             let gray = new cv.Mat();
             let bw = new cv.Mat();
             
-            // 1. High-Contrast Preprocessing mit Blur (verhindert das Aufreißen dünner Linien)
+            // --- 1. SCHUTZ DÜNNER LINIEN ---
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-
-            // Ein leichter Blur verdickt dünne Linien minimal, damit sie beim Threshold nicht verschwinden
+            
+            // Weichzeichner gegen Bildrauschen
             let ksize = new cv.Size(5, 5);
             cv.GaussianBlur(gray, gray, ksize, 0, 0, cv.BORDER_DEFAULT);
 
-            // Den C-Wert von 10 auf 3 reduzieren! So werden auch dünnere/schwächere Linien erhalten.
+            // Sensibler Threshold (C=3 statt 10)
             cv.adaptiveThreshold(gray, bw, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 31, 3);
-            // Thresholding auf dem perfekten Warp (C-Wert auf 4 reduzieren für bessere Locherkennung)
-            cv.adaptiveThreshold(warpedGray, warpedBw, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 21, 4);
 
-            // 2. Target Detection & Perspective Warp
+            // Dilation: Verdickt weiße Pixel (Linien), um Lücken zu schließen
+            let M_dil = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+            cv.dilate(bw, bw, M_dil, new cv.Point(-1, -1), 1);
+
+            // --- 2. TARGET DETECTION & WARP ---
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
             cv.findContours(bw, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-            let maxArea = 0;
-            let maxContourIndex = -1;
+            let maxArea = 0, maxIdx = -1;
             for (let i = 0; i < contours.size(); i++) {
-                let cnt = contours.get(i);
-                let area = cv.contourArea(cnt);
-                if (area > maxArea) {
-                    maxArea = area;
-                    maxContourIndex = i;
-                }
+                let area = cv.contourArea(contours.get(i));
+                if (area > maxArea) { maxArea = area; maxIdx = i; }
             }
 
-            if (maxContourIndex === -1) {
-                alert("Keine Zielscheibe gefunden!");
-                return;
-            }
+            if (maxIdx === -1) { alert("Kein Zielring erkannt!"); return; }
 
-            // minAreaRect anwenden, um die 4 Ecken zu bekommen
-            let cnt = contours.get(maxContourIndex);
-            let rotatedRect = cv.minAreaRect(cnt);
+            let rotatedRect = cv.minAreaRect(contours.get(maxIdx));
             let vertices = cv.RotatedRect.points(rotatedRect);
-            let pointsArray = [
-                {x: vertices[0].x, y: vertices[0].y},
-                {x: vertices[1].x, y: vertices[1].y},
-                {x: vertices[2].x, y: vertices[2].y},
-                {x: vertices[3].x, y: vertices[3].y}
-            ];
-            
-            let orderedPts = orderPoints(pointsArray);
-            
-            // Warp Zielgröße definieren (perfektes Quadrat für konsistente Radien)
-            let warpSize = 800; 
-            let dsize = new cv.Size(warpSize, warpSize);
-            
-            let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-                orderedPts[0].x, orderedPts[0].y,
-                orderedPts[1].x, orderedPts[1].y,
-                orderedPts[2].x, orderedPts[2].y,
-                orderedPts[3].x, orderedPts[3].y
-            ]);
-            let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-                0, 0, 
-                warpSize, 0, 
-                warpSize, warpSize, 
-                0, warpSize
-            ]);
+            let orderedPts = orderPoints([{x:vertices[0].x, y:vertices[0].y},{x:vertices[1].x, y:vertices[1].y},{x:vertices[2].x, y:vertices[2].y},{x:vertices[3].x, y:vertices[3].y}]);
 
-            let M = cv.getPerspectiveTransform(srcTri, dstTri);
+            let warpSize = 800;
+            let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [orderedPts[0].x, orderedPts[0].y, orderedPts[1].x, orderedPts[1].y, orderedPts[2].x, orderedPts[2].y, orderedPts[3].x, orderedPts[3].y]);
+            let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, warpSize, 0, warpSize, warpSize, 0, warpSize]);
+            let M_warp = cv.getPerspectiveTransform(srcTri, dstTri);
+            
             let warpedOutput = new cv.Mat();
-            cv.warpPerspective(src, warpedOutput, M, dsize); // Das visualisierte Endbild
+            cv.warpPerspective(src, warpedOutput, M_warp, new cv.Size(warpSize, warpSize));
             
-            // Auch das Graustufen-Bild warpen für saubere Einschuss-Analyse
             let warpedGray = new cv.Mat();
-            cv.warpPerspective(gray, warpedGray, M, dsize);
-            
-            // Thresholding auf dem perfekten Warp für die Locherkennung
+            cv.warpPerspective(gray, warpedGray, M_warp, new cv.Size(warpSize, warpSize));
+
+            // --- 3. LOCHERKENNUNG ---
             let warpedBw = new cv.Mat();
-            cv.adaptiveThreshold(warpedGray, warpedBw, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 21, 10);
+            cv.adaptiveThreshold(warpedGray, warpedBw, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 25, 4);
 
-            // 3. Dynamisches Scoring-Grid
-            let M_center = warpSize / 2;
-            let n_rings = parseInt(ringsInput.value);
-            // Der äußere Ring berührt die Kanten des Warps, also Radius = warpSize / 2
-            let maxRadius = warpSize / 2;
-            let ringWidth = maxRadius / n_rings;
+            let n_rings = parseInt(document.getElementById('ringsInput').value);
+            let center = warpSize / 2;
+            let ringW = center / n_rings;
 
-            // Zeichne blaue Ringe zur Visualisierung
-            for(let i = 1; i <= n_rings; i++) {
-                cv.circle(warpedOutput, new cv.Point(M_center, M_center), ringWidth * i, new cv.Scalar(255, 150, 50, 255), 2);
-            }
+            let wContours = new cv.MatVector();
+            cv.findContours(warpedBw, wContours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
-            // 4. Klassifizierung (Zahlen vs. Treffer)
-            let warpedContours = new cv.MatVector();
-            let warpedHierarchy = new cv.Mat();
-            cv.findContours(warpedBw, warpedContours, warpedHierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+            let score = 0, hits = 0;
+            for (let i = 0; i < wContours.size(); i++) {
+                let cnt = wContours.get(i);
+                let area = cv.contourArea(cnt);
+                if (area < 15 || area > 5000) continue; // Rauschfilter & Riesenobjekte
 
-            let totalScore = 0;
-            let hitCount = 0;
-            let tolerance = maxRadius * 0.05; // 5% Toleranz für die Achsen (Zahlen)
+                let mom = cv.moments(cnt);
+                let cx = mom.m10 / mom.m00, cy = mom.m01 / mom.m00;
+                let dist = Math.sqrt((cx - center)**2 + (cy - center)**2);
+                if (dist > center) continue;
 
-            for (let i = 0; i < warpedContours.size(); ++i) {
-                let wCnt = warpedContours.get(i);
-                let wArea = cv.contourArea(wCnt);
-                
-                // Filter: Zu klein (Rauschen) oder zu groß (komplette Scheibe) ignorieren
-                if (wArea < 20 || wArea > maxRadius * maxRadius * 0.5) continue;
-
-                let moments = cv.moments(wCnt, false);
-                let cx = moments.m10 / moments.m00;
-                let cy = moments.m01 / moments.m00;
-
-                // Abstand zum Zentrum
-                let dist = Math.sqrt(Math.pow(cx - M_center, 2) + Math.pow(cy - M_center, 2));
-                
-                // Liegt außerhalb der Scheibe?
-                if (dist > maxRadius) continue;
-
-                // Achsen-Filter (Zahlen erkennen)
-                let onHorizontalAxis = Math.abs(cy - M_center) < tolerance;
-                let onVerticalAxis = Math.abs(cx - M_center) < tolerance;
-
-                if (onHorizontalAxis || onVerticalAxis) {
-                    // Zahl (Gelb markieren)
-                    cv.drawContours(warpedOutput, warpedContours, i, new cv.Scalar(255, 255, 0, 255), 2);
+                // Achsen-Check (Zahlen ignorieren)
+                let tol = center * 0.06;
+                if (Math.abs(cy - center) < tol || Math.abs(cx - center) < tol) {
+                    cv.drawContours(warpedOutput, wContours, i, [255, 255, 0, 255], 2);
                 } else {
-                    // Einschussloch (Rot markieren und werten)
-                    cv.drawContours(warpedOutput, warpedContours, i, new cv.Scalar(0, 0, 255, 255), -1); // -1 füllt die Kontur
-                    
-                    // Score Berechnung
-                    // dist / ringWidth gibt uns an, in welchem Ringabschnitt wir sind.
-                    // Ring 1 (Mitte) hat max Score.
-                    let score = n_rings - Math.floor(dist / ringWidth);
-                    if (score < 0) score = 0;
-                    if (score > n_rings) score = n_rings;
-                    
-                    totalScore += score;
-                    hitCount++;
+                    cv.drawContours(warpedOutput, wContours, i, [255, 0, 0, 255], -1);
+                    score += Math.max(0, n_rings - Math.floor(dist / ringW));
+                    hits++;
                 }
             }
 
-            // 5. Output & Visualisierung
-            cv.imshow('outputCanvas', warpedOutput);
-            
-            // Score aktualisieren und Panel einblenden
-            document.getElementById('totalScore').innerText = totalScore;
-            document.getElementById('hitCount').innerText = hitCount;
-            document.getElementById('scorePanel').style.display = 'flex';
+            // Ringe zur Kontrolle zeichnen
+            for(let j=1; j<=n_rings; j++) cv.circle(warpedOutput, new cv.Point(center, center), ringW*j, [0, 200, 255, 255], 1);
 
-            // Memory Cleanup (Sehr wichtig in OpenCV.js!)
-            src.delete(); gray.delete(); bw.delete(); contours.delete(); hierarchy.delete();
-            srcTri.delete(); dstTri.delete(); M.delete(); warpedOutput.delete(); 
-            warpedGray.delete(); warpedBw.delete(); warpedContours.delete(); warpedHierarchy.delete();
+            cv.imshow('outputCanvas', warpedOutput);
+            document.getElementById('totalScore').innerText = score;
+            document.getElementById('hitCount').innerText = hits;
+            document.getElementById('scorePanel').style.display = 'block';
+
+            // Cleanup
+            src.delete(); gray.delete(); bw.delete(); M_dil.delete(); contours.delete(); hierarchy.delete();
+            srcTri.delete(); dstTri.delete(); M_warp.delete(); warpedOutput.delete(); warpedGray.delete(); warpedBw.delete(); wContours.delete();
         });
     </script>
 </body>
