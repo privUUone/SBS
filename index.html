@@ -3,242 +3,200 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Schießscheiben Scanner (Geometrie-Ansatz)</title>
+    <title>Target Scanner Pro - Geometrie Edition</title>
     <style>
-        body { font-family: sans-serif; background: #f4f4f9; padding: 20px; color: #333; }
-        .container { max-width: 900px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        h1 { font-size: 1.5rem; color: #2c3e50; }
-        .controls { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
-        input[type="file"] { border: 1px solid #ccc; padding: 5px; border-radius: 4px; }
-        input[type="number"] { width: 60px; padding: 5px; }
-        button { background: #3498db; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
-        button:hover { background: #2980b9; }
-        button:disabled { background: #95a5a6; cursor: not-allowed; }
-        .canvas-container { display: flex; gap: 20px; flex-wrap: wrap; }
-        canvas { max-width: 100%; border: 1px solid #ddd; border-radius: 4px; background: #eee; }
-        #status { font-weight: bold; color: #e67e22; margin-bottom: 10px; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 1200px; background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        h1 { color: #1a73e8; margin-top: 0; border-bottom: 2px solid #e8f0fe; padding-bottom: 10px; }
+        .top-bar { display: flex; gap: 20px; flex-wrap: wrap; background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; align-items: center; border: 1px solid #dee2e6; }
+        .control-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 0.85rem; font-weight: bold; color: #5f6368; }
+        input, button { padding: 10px; border-radius: 5px; border: 1px solid #dadce0; }
+        button { background: #1a73e8; color: white; border: none; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: #1557b0; }
+        button:disabled { background: #ccc; }
+        .main-layout { display: grid; grid-template-columns: 1fr 300px; gap: 30px; }
+        canvas { width: 100%; height: auto; background: #333; border-radius: 8px; border: 4px solid #fff; box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+        .sidebar { background: #ffffff; border: 1px solid #dadce0; border-radius: 10px; padding: 20px; }
+        .score-big { font-size: 3rem; font-weight: bold; text-align: center; color: #202124; margin: 10px 0; }
+        .hit-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #f1f3f4; font-size: 0.9rem; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.8rem; }
+        .badge-red { background: #fce8e6; color: #d93025; }
+        .badge-yellow { background: #fef7e0; color: #f9ab00; }
+        #status { color: #1a73e8; font-weight: bold; margin-bottom: 15px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🎯 Geometrischer Target Scanner</h1>
-    
-    <div id="status">Lade OpenCV.js... Bitte warten.</div>
+    <h1>🎯 Target Scanner Pro</h1>
+    <div id="status">Warte auf OpenCV...</div>
 
-    <div class="controls">
-        <input type="file" id="imageInput" accept="image/*" disabled>
-        <label>Anzahl Ringe: 
-            <input type="number" id="ringCount" value="5" min="1" max="10">
-        </label>
-        <label>Toleranz Achse (px): 
-            <input type="number" id="axisTolerance" value="15" min="1" max="50">
-        </label>
-        <button id="scanBtn" disabled>Bild Analysieren</button>
+    <div class="top-bar">
+        <div class="control-group">
+            <label>Bildquelle</label>
+            <input type="file" id="fileInput" accept="image/*" disabled>
+        </div>
+        <div class="control-group">
+            <label>Ringe (Anzahl)</label>
+            <input type="number" id="ringCount" value="10" min="1" max="15">
+        </div>
+        <div class="control-group">
+            <label>Achsen-Toleranz (px)</label>
+            <input type="number" id="tolerance" value="25" min="5" max="100">
+        </div>
+        <button id="processBtn" disabled>Scan starten</button>
     </div>
 
-    <div class="canvas-container">
-        <div>
-            <h3>Originalbild</h3>
-            <canvas id="canvasInput"></canvas>
+    <div class="main-layout">
+        <div class="view">
+            <canvas id="outputCanvas"></canvas>
         </div>
-        <div>
-            <h3>Analyse (Ergebnis)</h3>
-            <canvas id="canvasOutput"></canvas>
+        <div class="sidebar">
+            <h3 style="margin-top:0">Ergebnis</h3>
+            <div class="score-big" id="totalScore">0</div>
+            <div style="text-align:center; color:#70757a; margin-bottom:20px;">GESAMTPUNKTE</div>
+            <div id="hitList"></div>
         </div>
     </div>
 </div>
 
-<script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+<canvas id="hiddenCanvas" style="display:none;"></canvas>
+<script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="cvReady()"></script>
 
 <script>
-    let imgElement = new Image();
-    let isCvReady = false;
+let isReady = false;
+const statusEl = document.getElementById('status');
 
-    function onOpenCvReady() {
-        document.getElementById('status').innerText = 'OpenCV ist bereit! Bild hochladen.';
-        document.getElementById('status').style.color = '#27ae60';
-        document.getElementById('imageInput').disabled = false;
-        isCvReady = true;
+function cvReady() {
+    statusEl.innerText = "OpenCV geladen. Bereit zum Scan.";
+    document.getElementById('fileInput').disabled = false;
+    isReady = true;
+}
+
+document.getElementById('fileInput').onchange = function(e) {
+    let reader = new FileReader();
+    reader.onload = function(event) {
+        let img = new Image();
+        img.onload = function() {
+            let canvas = document.getElementById('hiddenCanvas');
+            let ctx = canvas.getContext('2d');
+            let scale = Math.min(1000 / img.width, 1);
+            canvas.width = img.width * scale;
+            canvas.height = img.height * scale;
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            document.getElementById('processBtn').disabled = false;
+        }
+        img.src = event.target.result;
+    }
+    reader.readAsDataURL(e.target.files[0]);
+};
+
+document.getElementById('processBtn').onclick = function() {
+    const src = cv.imread('hiddenCanvas');
+    const dst = src.clone();
+    const gray = new cv.Mat();
+    const binary = new cv.Mat();
+    
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
+
+    let contours = new cv.MatVector();
+    let hierarchy = new cv.Mat();
+    cv.findContours(binary, contours, hierarchy, cv.RETR_CCOMP, cv.CHAIN_APPROX_SIMPLE);
+
+    // 1. Zentrum finden (Größter runder Ring)
+    let center = null;
+    let maxR = 0;
+    for (let i = 0; i < contours.size(); ++i) {
+        let cnt = contours.get(i);
+        let area = cv.contourArea(cnt);
+        if (area < 1000) continue;
+        let circle = cv.minEnclosingCircle(cnt);
+        let circularity = (4 * Math.PI * area) / (cv.arcLength(cnt, true) ** 2);
+        if (circularity > 0.5 && circle.radius > maxR) {
+            maxR = circle.radius;
+            center = circle.center;
+        }
     }
 
-    // Bild hochladen und auf Input-Canvas zeichnen
-    document.getElementById('imageInput').addEventListener('change', (e) => {
-        let file = e.target.files[0];
-        if (!file) return;
-        
-        let reader = new FileReader();
-        reader.onload = function(event) {
-            imgElement.src = event.target.result;
-            imgElement.onload = function() {
-                let canvas = document.getElementById('canvasInput');
-                let ctx = canvas.getContext('2d');
-                // Skaliere Bild für bessere Web-Performance
-                let MAX_WIDTH = 800;
-                let scale = Math.min(MAX_WIDTH / imgElement.width, 1);
-                canvas.width = imgElement.width * scale;
-                canvas.height = imgElement.height * scale;
-                ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
-                document.getElementById('scanBtn').disabled = false;
+    if (!center) { alert("Scheibe nicht erkannt!"); return; }
+
+    // Hilfswerte
+    const ringQty = parseInt(document.getElementById('ringCount').value);
+    const tol = parseInt(document.getElementById('tolerance').value);
+    const ringW = maxR / ringQty;
+    let hits = [];
+    let numberData = [];
+
+    // 2. Loop durch alle Formen
+    for (let i = 0; i < contours.size(); ++i) {
+        let cnt = contours.get(i);
+        let area = cv.contourArea(cnt);
+        if (area < 20 || area > (maxR * maxR)) continue;
+
+        let M = cv.moments(cnt);
+        let cx = M.m10 / M.m00;
+        let cy = M.m01 / M.m00;
+        let dist = Math.sqrt((cx - center.x)**2 + (cy - center.y)**2);
+        if (dist > maxR) continue;
+
+        let onAxis = (Math.abs(cx - center.x) < tol || Math.abs(cy - center.y) < tol);
+
+        if (onAxis) {
+            numberData.push({ area, cx, cy, dist, ring: Math.floor(dist / ringW), idx: i });
+            cv.drawContours(dst, contours, i, [0, 255, 0, 255], 1);
+        } else {
+            let circ = (4 * Math.PI * area) / (cv.arcLength(cnt, true) ** 2);
+            if (circ > 0.3) {
+                hits.push({ dist, score: Math.max(0, 10 - Math.floor(dist / ringW)), type: 'Direkt' });
+                cv.circle(dst, new cv.Point(cx, cy), 8, [255, 0, 0, 255], 2);
             }
-        };
-        reader.readAsDataURL(file);
+        }
+    }
+
+    // 3. Flächen-Abgleich (Der "8er" Fix)
+    // Wir gruppieren nach Ringen und nutzen den Median der Flächen
+    let groups = {};
+    numberData.forEach(n => {
+        if (!groups[n.ring]) groups[n.ring] = [];
+        groups[n.ring].push(n);
     });
 
-    // Hauptalgorithmus (Dein Workflow)
-    document.getElementById('scanBtn').addEventListener('click', () => {
-        if (!isCvReady) return;
-
-        let canvasInput = document.getElementById('canvasInput');
-        let src = cv.imread(canvasInput);
-        let dst = src.clone(); // Für das visuelle Ergebnis
-        let gray = new cv.Mat();
-        let binary = new cv.Mat();
-
-        let ringCount = parseInt(document.getElementById('ringCount').value);
-        let tolerance = parseInt(document.getElementById('axisTolerance').value);
-
-        // 1. Schwarz-Weiß Bild erstellen
-        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+    for (let r in groups) {
+        let sorted = groups[r].sort((a, b) => a.area - b.area);
+        let medianArea = sorted[Math.floor(sorted.length / 2)].area;
         
-        // Adaptiver Threshold hilft bei ungleichmäßiger Beleuchtung besser als ein harter Cutoff
-        cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 15, 5);
-
-        // Konturen finden
-        let contours = new cv.MatVector();
-        let hierarchy = new cv.Mat();
-        cv.findContours(binary, contours, hierarchy, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE);
-
-        let targetCenter = null;
-        let maxRadius = 0;
-
-        // 2. Äußersten Ring finden (Suche nach der größten, relativ runden Kontur)
-        for (let i = 0; i < contours.size(); ++i) {
-            let cnt = contours.get(i);
-            let area = cv.contourArea(cnt);
-            if (area < 5000) continue; // Zu klein für den Außenring
-
-            let perimeter = cv.arcLength(cnt, true);
-            let circularity = (4 * Math.PI * area) / (perimeter * perimeter);
-
-            if (circularity > 0.7) { // 1.0 wäre ein perfekter Kreis
-                let circleInfo = cv.minEnclosingCircle(cnt);
-                if (circleInfo.radius > maxRadius) {
-                    maxRadius = circleInfo.radius;
-                    targetCenter = circleInfo.center;
-                }
+        sorted.forEach(n => {
+            // Ein Loch muss die Fläche extrem verändern (Faktor 2.2 statt 1.5)
+            // Oder die Zahl ist durch das Loch extrem klein geworden (Faktor 0.4)
+            if (n.area > medianArea * 2.2 || n.area < medianArea * 0.4) {
+                hits.push({ dist: n.dist, score: Math.max(0, 10 - Math.floor(n.dist / ringW)), type: 'Korrektur' });
+                cv.circle(dst, new cv.Point(n.cx, n.cy), 10, [255, 255, 0, 255], 2);
             }
-        }
-
-        if (!targetCenter) {
-            alert("Konnte den Außenring nicht finden! Bild evtl. zu schräg oder schlecht beleuchtet.");
-            // Cleanup
-            src.delete(); dst.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete();
-            return;
-        }
-
-        // Zeichne Zentrum und Außenring zur Kontrolle (Blau)
-        cv.circle(dst, targetCenter, maxRadius, [255, 0, 0, 255], 2);
-        cv.circle(dst, targetCenter, 3, [255, 0, 0, 255], -1);
-
-        // 3. Ringbreite berechnen
-        let ringWidth = maxRadius / ringCount;
-
-        let numberContours = [];
-        let holeContours = [];
-
-        // 4. & 5. Alle restlichen Konturen klassifizieren (Zahlen vs. Löcher)
-        for (let i = 0; i < contours.size(); ++i) {
-            let cnt = contours.get(i);
-            let area = cv.contourArea(cnt);
-            
-            // Ignoriere Rauschen und den riesigen Außenring selbst
-            if (area < 10 || area > maxRadius * maxRadius) continue;
-
-            let M = cv.moments(cnt, false);
-            if (M.m00 === 0) continue;
-            let cx = M.m10 / M.m00;
-            let cy = M.m01 / M.m00;
-
-            // Distanz zum Zentrum
-            let dx = cx - targetCenter.x;
-            let dy = cy - targetCenter.y;
-            let distanceToCenter = Math.sqrt(dx*dx + dy*dy);
-
-            // Ist es im äußeren Ring?
-            if (distanceToCenter > maxRadius) continue;
-
-            // Prüfen ob Zentrum auf der horizontalen oder vertikalen Achse liegt (Fadenkreuz)
-            let isOnHorizontalAxis = Math.abs(cy - targetCenter.y) < tolerance;
-            let isOnVerticalAxis = Math.abs(cx - targetCenter.x) < tolerance;
-
-            if (isOnHorizontalAxis || isOnVerticalAxis) {
-                // Das ist potentiell eine Zahl!
-                // Speichere sie mit ihrem Ring-Abstand (gerundet) um später Gruppen zu bilden
-                let ringIndex = Math.floor(distanceToCenter / ringWidth);
-                numberContours.push({
-                    contour: cnt,
-                    cx: cx, cy: cy,
-                    area: area,
-                    ringIndex: ringIndex,
-                    originalIndex: i
-                });
-                
-                // Markiere gefundene Zahl grün
-                let color = new cv.Scalar(0, 255, 0, 255);
-                cv.drawContours(dst, contours, i, color, 1, cv.LINE_8, hierarchy, 0);
-            } else {
-                // Keine Zahl, liegt abseits des Kreuzes -> Potentielles Einschussloch (Restliche Flecken)
-                // Filter für echte Löcher: Müssen relativ rund sein und eine gewisse Mindestgröße haben
-                let perimeter = cv.arcLength(cnt, true);
-                let circularity = (4 * Math.PI * area) / (perimeter * perimeter);
-                
-                if (circularity > 0.4 && area > 20) { // Tolerante Werte für ausgefranste Löcher
-                    holeContours.push({ cx: cx, cy: cy, area: area });
-                    // Markiere "freies" Loch rot
-                    cv.circle(dst, new cv.Point(cx, cy), 5, [255, 0, 0, 255], -1);
-                }
-            }
-        }
-
-        // 6. & 7. Löcher IN Zahlen finden (Flächenvergleich)
-        // Gruppiere Zahlen nach Ring
-        let numbersByRing = {};
-        numberContours.forEach(num => {
-            if (!numbersByRing[num.ringIndex]) numbersByRing[num.ringIndex] = [];
-            numbersByRing[num.ringIndex].push(num);
         });
+    }
 
-        // Vergleiche Flächen innerhalb eines Rings
-        for (let ring in numbersByRing) {
-            let numsInRing = numbersByRing[ring];
-            if (numsInRing.length < 2) continue; // Brauchen mindestens 2 zum Vergleichen
-
-            // Berechne Durchschnittsfläche der Zahlen in diesem Ring (Median wäre robuster, aber Durchschnitt reicht hier meist)
-            let totalArea = numsInRing.reduce((sum, n) => sum + n.area, 0);
-            let avgArea = totalArea / numsInRing.length;
-
-            numsInRing.forEach(num => {
-                // Wenn die Fläche 50% größer ist als der Durchschnitt, werten wir es als überlappendes Loch
-                if (num.area > avgArea * 1.5) {
-                    holeContours.push({ cx: num.cx, cy: num.cy, area: num.area });
-                    // Markiere überschneidendes Loch gelb (zur Verdeutlichung)
-                    cv.circle(dst, new cv.Point(num.cx, num.cy), 7, [255, 255, 0, 255], 2);
-                }
-            });
-        }
-
-        // Visualisierung: Ergebnis auf Canvas zeichnen
-        cv.imshow('canvasOutput', dst);
-
-        // Aufräumen (Memory Management in WebAssembly ist kritisch!)
-        src.delete(); dst.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete();
-
-        // Konsolen-Output der Ergebnisse
-        console.log(`Analyse beendet. Gefundene Einschusslöcher: ${holeContours.length}`);
+    // Anzeige
+    cv.circle(dst, center, maxR, [255, 0, 0, 255], 2);
+    cv.imshow('outputCanvas', dst);
+    
+    // Scoreboard
+    let total = 0;
+    let listHtml = "";
+    hits.forEach((h, i) => {
+        total += h.score;
+        listHtml += `<div class="hit-item">
+            <span>Treffer ${i+1} <span class="badge ${h.type=='Direkt'?'badge-red':'badge-yellow'}">${h.type}</span></span>
+            <strong>${h.score} Pkt</strong>
+        </div>`;
     });
-</script>
+    document.getElementById('totalScore').innerText = total;
+    document.getElementById('hitList').innerHTML = listHtml;
 
+    src.delete(); dst.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete();
+};
+</script>
 </body>
 </html>
 
