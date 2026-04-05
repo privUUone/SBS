@@ -3,53 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TargetScan Pro V4 - Edge & Area</title>
+    <title>TargetScan Ultra-Light</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
     <style>
-        body { font-family: sans-serif; background: #121212; color: white; display: flex; flex-direction: column; align-items: center; padding: 15px; margin: 0; }
-        #app-container { width: 100%; max-width: 500px; }
-        .controls { background: #1e1e1e; padding: 15px; border-radius: 12px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px; }
-        .control-row { display: flex; justify-content: space-between; align-items: center; }
-        input[type="number"] { width: 60px; padding: 8px; border-radius: 6px; border: 1px solid #444; background: #333; color: white; text-align: center; }
+        body { font-family: sans-serif; background: #121212; color: white; display: flex; flex-direction: column; align-items: center; padding: 10px; margin: 0; }
+        #app-container { width: 100%; max-width: 450px; }
+        .controls { background: #1e1e1e; padding: 15px; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        input { width: 50px; padding: 8px; border-radius: 6px; border: 1px solid #444; background: #333; color: white; text-align: center; }
         video, canvas { width: 100%; border-radius: 12px; background: #000; display: block; }
         #output-canvas, #hidden-canvas { display: none; }
-        button { width: 100%; padding: 15px; margin-top: 15px; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; }
+        button { width: 100%; padding: 18px; margin-top: 10px; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; }
         #scan-btn { background: #e53935; color: white; }
         #reset-btn { background: #2196f3; color: white; display: none; }
-        #loading { display: none; color: #ffeb3b; text-align: center; margin: 10px; }
-        #result-panel { display: none; background: #1e1e1e; padding: 20px; border-radius: 12px; margin-top: 15px; width: 100%; box-sizing: border-box; }
-        .result-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #333; }
-        .total { font-weight: bold; color: #4caf50; font-size: 1.3em; border: none; }
-        .debug-label { color: #ff9800; font-size: 0.9em; display: flex; align-items: center; gap: 5px;}
+        #status { text-align: center; margin: 10px; color: #ffeb3b; min-height: 20px; }
+        #result-panel { display: none; background: #1e1e1e; padding: 15px; border-radius: 12px; margin-top: 10px; width: 100%; box-sizing: border-box; }
+        .result-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #333; }
+        .total { font-weight: bold; color: #4caf50; font-size: 1.2em; }
     </style>
 </head>
 <body>
 
     <div id="app-container">
-        <h2>TargetScan V4</h2>
-        
         <div class="controls">
-            <div class="control-row">
-                <label>Anzahl Ringe (Mitte = 10):</label>
-                <input type="number" id="ring-count" value="6" min="1" max="10">
-            </div>
-            <div class="control-row">
-                <label class="debug-label">
-                    <input type="checkbox" id="debug-mode"> Debug-Ansicht zeigen
-                </label>
-            </div>
+            <label>Ringe (z.B. 6):</label>
+            <input type="number" id="ring-count" value="6">
         </div>
 
         <video id="camera-view" autoplay playsinline></video>
         <canvas id="output-canvas"></canvas>
         <canvas id="hidden-canvas"></canvas>
         
-        <div id="loading">Analysiere Kanten und Flächen...</div>
-        <button id="scan-btn" disabled>Warte auf System...</button>
+        <div id="status">Warte auf OpenCV...</div>
+        <button id="scan-btn" disabled>Bereit</button>
         <button id="reset-btn">Neuer Scan</button>
 
         <div id="result-panel">
-            <h3>Auswertung</h3>
             <div id="results-list"></div>
         </div>
     </div>
@@ -60,29 +48,30 @@
         const outputCanvas = document.getElementById('output-canvas');
         const scanBtn = document.getElementById('scan-btn');
         const resetBtn = document.getElementById('reset-btn');
-        const loading = document.getElementById('loading');
+        const status = document.getElementById('status');
         const resultsList = document.getElementById('results-list');
 
-        let cvReady = false;
         function onOpenCvReady() {
-            cvReady = true;
-            scanBtn.innerText = "Scheibe Scannen";
+            status.innerText = "Kamera wird gestartet...";
             scanBtn.disabled = false;
+            startCamera();
         }
 
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: {ideal: 1280}, height: {ideal: 720} } })
-            .then(s => video.srcObject = s).catch(e => alert("Kamera-Fehler: " + e));
+        async function startCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            video.srcObject = stream;
+            status.innerText = "Bereit zum Scannen";
+        }
 
         scanBtn.addEventListener('click', () => {
+            const ctx = hiddenCanvas.getContext('2d');
             hiddenCanvas.width = video.videoWidth;
             hiddenCanvas.height = video.videoHeight;
-            outputCanvas.width = video.videoWidth;
-            outputCanvas.height = video.videoHeight;
-            hiddenCanvas.getContext('2d').drawImage(video, 0, 0);
+            ctx.drawImage(video, 0, 0);
 
             video.style.display = 'none';
             scanBtn.style.display = 'none';
-            loading.style.display = 'block';
+            status.innerText = "Analysiere... (ca. 2-5 Sek)";
             outputCanvas.style.display = 'block';
 
             setTimeout(processImage, 100);
@@ -91,143 +80,119 @@
         resetBtn.addEventListener('click', () => { location.reload(); });
 
         function processImage() {
-            let isDebug = document.getElementById('debug-mode').checked;
-            let numRings = parseInt(document.getElementById('ring-count').value);
-            
             let src = cv.imread(hiddenCanvas);
-            let gray = new cv.Mat();
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-
-            // 1. Scheibe finden (HoughCircles bleibt hierfür ideal)
-            let blurred = new cv.Mat();
-            cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 0);
-            let targetCircles = new cv.Mat();
-            cv.HoughCircles(blurred, targetCircles, cv.HOUGH_GRADIENT, 1, 100, 50, 40, 100, 0);
-
-            if (targetCircles.cols === 0) {
-                alert("Keine äußere Scheibenkante gefunden.");
-                location.reload();
-                return;
-            }
-
-            let tx = targetCircles.data32F[0];
-            let ty = targetCircles.data32F[1];
-            let tr = targetCircles.data32F[2];
-            let targetArea = Math.PI * tr * tr;
-            let ringWidth = tr / numRings;
-
-            // 2. Kantenerkennung (Canny) für die Löcher
-            let edges = new cv.Mat();
-            // Sucht nach scharfen Kontrasten (Risse im Papier)
-            cv.Canny(blurred, edges, 40, 120); 
             
-            // Kanten "aufblähen", damit unregelmäßige Risse zu einer geschlossenen Form werden
-            let dilatedEdges = new cv.Mat();
-            let M_dilate = cv.Mat.ones(5, 5, cv.CV_8U);
-            cv.dilate(edges, dilatedEdges, M_dilate);
+            // --- SCHRITT 1: BILD VERKLEINERN (Wichtig für Speed!) ---
+            let dst = new cv.Mat();
+            let dsize = new cv.Size(600, Math.round(600 * src.rows / src.cols));
+            cv.resize(src, dst, dsize, 0, 0, cv.INTER_AREA);
+            
+            let gray = new cv.Mat();
+            cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY, 0);
+
+            // --- SCHRITT 2: SCHEIBE FINDEN (Über Konturen, nicht Hough) ---
+            let thresh = new cv.Mat();
+            cv.threshold(gray, thresh, 100, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
 
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
-            cv.findContours(dilatedEdges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-            // 3. Flächenanalyse: Durchschnittliche Lochgröße ermitteln
-            let validHoleAreas = [];
-            let holeData = [];
+            let target = null;
+            let maxArea = 0;
 
+            // Suche die größte runde Fläche (die Scheibe)
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
-
-                // Grober Filter: Nichts winziges (Staub) und nicht die ganze Scheibe
-                if (area > (targetArea * 0.0002) && area < (targetArea * 0.05)) {
-                    let M = cv.moments(cnt);
-                    let cx = M.m10 / M.m00;
-                    let cy = M.m01 / M.m00;
-                    let dist = Math.hypot(cx - tx, cy - ty);
-
-                    // Zentrum ignorieren (verhindert, dass das aufgedruckte 10er Zentrum als Loch zählt)
-                    if (dist < ringWidth * 0.4 && area > (ringWidth * ringWidth * 0.3)) continue;
-
-                    // Nur Konturen auf der Scheibe
-                    if (dist <= tr) {
-                        validHoleAreas.push(area);
-                        holeData.push({ cnt: cnt, area: area, cx: cx, cy: cy, dist: dist });
+                if (area > maxArea) {
+                    let rect = cv.boundingRect(cnt);
+                    let ratio = rect.width / rect.height;
+                    if (ratio > 0.8 && ratio < 1.2) { // Muss halbwegs quadratisch/rund sein
+                        maxArea = area;
+                        target = { x: rect.x + rect.width/2, y: rect.y + rect.height/2, r: (rect.width + rect.height)/4 };
                     }
                 }
             }
 
+            if (!target) {
+                status.innerText = "Keine Scheibe gefunden!";
+                resetBtn.style.display = "block";
+                dst.delete(); gray.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
+                return;
+            }
+
+            // --- SCHRITT 3: LÖCHER FINDEN ---
+            let edges = new cv.Mat();
+            cv.Canny(gray, edges, 50, 150);
+            let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+            cv.dilate(edges, edges, kernel);
+
+            let holeContours = new cv.MatVector();
+            cv.findContours(edges, holeContours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+            let foundHoles = [];
+            let numRings = parseInt(document.getElementById('ring-count').value);
+            let ringW = target.r / numRings;
+
+            for (let i = 0; i < holeContours.size(); ++i) {
+                let cnt = holeContours.get(i);
+                let area = cv.contourArea(cnt);
+                
+                // Filter: Lochgröße im Verhältnis zur Scheibe
+                if (area > (target.r * target.r * 0.005) && area < (target.r * target.r * 0.1)) {
+                    let M = cv.moments(cnt);
+                    let cx = M.m10 / M.m00;
+                    let cy = M.m01 / M.m00;
+                    let dist = Math.hypot(cx - target.x, cy - target.y);
+
+                    if (dist < target.r) {
+                        foundHoles.push({ area: area, dist: dist, cx: cx, cy: cy });
+                    }
+                }
+            }
+
+            // --- SCHRITT 4: MULTI-TREFFER LOGIK ---
             let treffer = [];
+            if (foundHoles.length > 0) {
+                foundHoles.sort((a,b) => a.area - b.area);
+                let avgArea = foundHoles[Math.floor(foundHoles.length / 2)].area; // Median
 
-            // Wenn wir potenzielle Löcher gefunden haben, berechnen wir die Multiplikatoren
-            if (validHoleAreas.length > 0) {
-                // Median (mittlere Größe) berechnen, um Ausreißer zu ignorieren
-                validHoleAreas.sort((a, b) => a - b);
-                let medianArea = validHoleAreas[Math.floor(validHoleAreas.length / 2)];
-
-                // 4. Punkte zuweisen & Mehrfachtreffer zählen
-                holeData.forEach(hole => {
-                    // Wie oft passt die Standard-Lochgröße in diese Fläche?
-                    let shotCount = Math.round(hole.area / medianArea);
-                    if (shotCount < 1) shotCount = 1;
-                    if (shotCount > 5) shotCount = 5; // Maximal 5 Schuss pro Riss als Limit
-
-                    // Punkteberechnung: 10 in der Mitte, abnehmend nach außen
-                    // distance 0 bis ringWidth = 10, nächste Ring = 9 etc.
-                    let points = 10 - Math.floor(hole.dist / ringWidth);
+                foundHoles.forEach(h => {
+                    let shots = Math.max(1, Math.round(h.area / avgArea));
+                    let p = 10 - Math.floor(h.dist / ringW);
+                    p = Math.max(10 - numRings + 1, Math.min(10, p));
                     
-                    // Verhindern, dass Punkte unter den Minimalwert (z.B. 5 bei 6 Ringen) oder über 10 fallen
-                    let minPoints = 10 - numRings + 1;
-                    points = Math.max(minPoints, Math.min(10, points));
+                    for(let s=0; s<shots; s++) treffer.push(p);
 
-                    // Wenn das Loch doppelt so groß ist, zählen wir die Punkte auch 2x (oder 3x)
-                    for (let s = 0; s < shotCount; s++) {
-                        treffer.push(points);
-                    }
-
-                    // Zeichnen fürs UI
-                    if (!isDebug) {
-                        // Bei echten Bildern: Zeichne rote Kreise mit Multiplikator-Anzeige
-                        cv.circle(src, new cv.Point(hole.cx, hole.cy), Math.sqrt(hole.area/Math.PI), [255, 0, 0, 255], 3);
-                        let label = shotCount > 1 ? `${points} (${shotCount}x)` : `${points}`;
-                        cv.putText(src, label, new cv.Point(hole.cx + 15, hole.cy - 10), cv.FONT_HERSHEY_SIMPLEX, 0.8, [255, 255, 0, 255], 2);
-                    }
+                    // Zeichnen
+                    cv.circle(dst, new cv.Point(h.cx, h.cy), 5, [255, 0, 0, 255], -1);
+                    cv.putText(dst, p.toString(), new cv.Point(h.cx+5, h.cy-5), 1, 1.2, [255, 255, 0, 255], 2);
                 });
             }
 
-            // Scheibenrand einzeichnen
-            if (!isDebug) cv.circle(src, new cv.Point(tx, ty), tr, [0, 255, 0, 255], 3);
-
-            // Ausgabe
-            if (isDebug) {
-                cv.imshow('output-canvas', dilatedEdges); // Zeigt das reine Kanten-Bild
-            } else {
-                cv.imshow('output-canvas', src); // Zeigt das Originalbild mit Markierungen
-            }
-
+            cv.circle(dst, new cv.Point(target.x, target.y), target.r, [0, 255, 0, 255], 2);
+            cv.imshow('output-canvas', dst);
+            
             zeigeErgebnis(treffer);
-            
-            loading.style.display = 'none';
-            resetBtn.style.display = 'block';
-            
-            // Speicher aufräumen
-            src.delete(); gray.delete(); blurred.delete(); targetCircles.delete(); 
-            edges.delete(); dilatedEdges.delete(); M_dilate.delete(); contours.delete(); hierarchy.delete();
+            status.innerText = "Analyse fertig";
+            resetBtn.style.display = "block";
+
+            // SPEICHER FREIGEBEN
+            src.delete(); dst.delete(); gray.delete(); thresh.delete(); 
+            edges.delete(); kernel.delete(); contours.delete(); 
+            holeContours.delete(); hierarchy.delete();
         }
 
         function zeigeErgebnis(treffer) {
             resultsList.innerHTML = "";
-            if(treffer.length === 0) {
-                resultsList.innerHTML = "<p style='color:#ff5252;'>Keine Treffer im messbaren Bereich gefunden.</p>";
-            } else {
-                let sum = 0;
-                let counts = {};
-                treffer.forEach(p => { counts[p] = (counts[p] || 0) + 1; sum += p; });
-
-                Object.keys(counts).sort((a,b) => b-a).forEach(p => {
-                    resultsList.innerHTML += `<div class="result-row"><span>${p}er Ring:</span><span>${counts[p]}x getroffen</span></div>`;
-                });
-                resultsList.innerHTML += `<div class="result-row total"><span>Gesamtpunkte:</span><span>${sum}</span></div>`;
-            }
+            let sum = 0;
+            let counts = {};
+            treffer.forEach(p => { counts[p] = (counts[p] || 0) + 1; sum += p; });
+            Object.keys(counts).sort((a,b) => b-a).forEach(p => {
+                resultsList.innerHTML += `<div class="result-row"><span>${p}er Ring:</span><span>${counts[p]}x</span></div>`;
+            });
+            resultsList.innerHTML += `<div class="result-row total"><span>Gesamt:</span><span>${sum} Punkte</span></div>`;
             document.getElementById('result-panel').style.display = 'block';
         }
     </script>
