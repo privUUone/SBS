@@ -3,202 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Target Scanner Pro v3</title>
+    <title>Schussbild Auswertung</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: #e0e0e0; margin: 0; padding: 20px; }
-        .container { max-width: 1200px; margin: auto; background: #1e1e1e; padding: 25px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
-        .top-bar { display: flex; gap: 15px; flex-wrap: wrap; background: #2c2c2c; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #3d3d3d; }
-        .control-group { display: flex; flex-direction: column; gap: 5px; }
-        input, button { padding: 12px; border-radius: 6px; border: 1px solid #444; background: #333; color: white; }
-        button { background: #007bff; border: none; cursor: pointer; font-weight: bold; }
-        button:hover { background: #0056b3; }
-        button:disabled { background: #555; }
-        .main-layout { display: grid; grid-template-columns: 1fr 350px; gap: 20px; }
-        canvas { width: 100%; border-radius: 8px; background: #000; display: block; }
-        .sidebar { background: #252525; border-radius: 10px; padding: 20px; border: 1px solid #333; }
-        .score-big { font-size: 4rem; font-weight: bold; text-align: center; color: #00ff88; margin: 10px 0; }
-        .hit-list { max-height: 400px; overflow-y: auto; margin-top: 20px; }
-        .hit-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #333; }
-        #status { color: #007bff; margin-bottom: 15px; text-align: center; font-weight: bold; }
+        body { font-family: sans-serif; padding: 20px; background-color: #f4f4f9; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .controls { margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
+        canvas { max-width: 100%; border: 1px solid #ccc; margin-top: 10px; }
+        #status { font-weight: bold; color: #d9534f; margin-bottom: 10px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div id="status">Warte auf OpenCV.js...</div>
+    <h1>Schussbild Scanner</h1>
+    <div id="status">OpenCV.js lädt... Bitte warten.</div>
     
-    <div class="top-bar">
-        <div class="control-group">
-            <label>Bild wählen</label>
-            <input type="file" id="fileInput" accept="image/*" disabled>
-        </div>
-        <div class="control-group">
-            <label>Ringe</label>
-            <input type="number" id="ringCount" value="10">
-        </div>
-        <div class="control-group">
-            <label>Achsen-Toleranz</label>
-            <input type="number" id="tolerance" value="25">
-        </div>
-        <button id="processBtn" disabled>SCAN STARTEN</button>
+    <div class="controls">
+        <input type="file" id="imageInput" accept="image/*" disabled>
+        <label for="rings">Anzahl der Ringe (z.B. 5 für 6-10):</label>
+        <input type="number" id="rings" value="5" min="1" max="10" disabled>
+        <button id="scanButton" disabled>Scannen & Auswerten</button>
     </div>
 
-    <div class="main-layout">
+    <div>
+        <h3>Ergebnis:</h3>
         <canvas id="outputCanvas"></canvas>
-        <div class="sidebar">
-            <h3 style="text-align:center; margin:0;">PUNKTE</h3>
-            <div class="score-big" id="totalScore">0</div>
-            <div id="hitList" class="hit-list"></div>
-        </div>
     </div>
 </div>
 
-<canvas id="hiddenCanvas" style="display:none;"></canvas>
+<script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+<script src="app.js"></script>
 
-<script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="cvReady()"></script>
-
-<script>
-let isReady = false;
-const statusEl = document.getElementById('status');
-
-function cvReady() {
-    statusEl.innerText = "OpenCV BEREIT";
-    document.getElementById('fileInput').disabled = false;
-    isReady = true;
-}
-
-document.getElementById('fileInput').onchange = function(e) {
-    let reader = new FileReader();
-    reader.onload = function(event) {
-        let img = new Image();
-        img.onload = function() {
-            let canvas = document.getElementById('hiddenCanvas');
-            let ctx = canvas.getContext('2d');
-            
-            // Verhindert das 2-Pixel-Problem: Skaliere auf max 1200px Breite
-            let scale = Math.min(1200 / img.width, 1);
-            canvas.width = img.width * scale;
-            canvas.height = img.height * scale;
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            
-            statusEl.innerText = "Bild geladen (" + canvas.width + "x" + canvas.height + " px)";
-            document.getElementById('processBtn').disabled = false;
-        }
-        img.src = event.target.result;
-    }
-    reader.readAsDataURL(e.target.files[0]);
-};
-
-document.getElementById('processBtn').onclick = function() {
-    if(!isReady) return;
-    
-    const src = cv.imread('hiddenCanvas');
-    let dst = new cv.Mat();
-    let gray = new cv.Mat();
-    let binary = new cv.Mat();
-    
-    // 1. Vorverarbeitung
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-    
-    // Stärkerer Filter gegen Papier-Rauschen
-    cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 25, 10);
-
-    // NEU: Noise-Cancellation (Löscht alles unter 3x3 Pixel)
-    let M_noise = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
-    cv.morphologyEx(binary, binary, cv.MORPH_OPEN, M_noise);
-
-    let contours = new cv.MatVector();
-    let hierarchy = new cv.Mat();
-    cv.findContours(binary, contours, hierarchy, cv.RETR_CCOMP, cv.CHAIN_APPROX_SIMPLE);
-
-    // 2. Zentrum finden
-    let center = null;
-    let maxR = 0;
-    for (let i = 0; i < contours.size(); ++i) {
-        let cnt = contours.get(i);
-        let area = cv.contourArea(cnt);
-        if (area < 2000) continue;
-        let circle = cv.minEnclosingCircle(cnt);
-        let perimeter = cv.arcLength(cnt, true);
-        let circularity = (4 * Math.PI * area) / (perimeter * perimeter);
-        if (circularity > 0.6 && circle.radius > maxR) {
-            maxR = circle.radius;
-            center = circle.center;
-        }
-    }
-
-    if (!center) { 
-        alert("Konnte Schießscheibe nicht finden. Achte auf guten Kontrast!"); 
-        return; 
-    }
-
-    // Visualisierung vorbereiten
-    src.copyTo(dst);
-    const ringQty = parseInt(document.getElementById('ringCount').value);
-    const tol = parseInt(document.getElementById('tolerance').value);
-    const ringW = maxR / ringQty;
-    let hits = [];
-    let numberData = [];
-
-    // 3. Analyse der Formen
-    for (let i = 0; i < contours.size(); ++i) {
-        let cnt = contours.get(i);
-        let area = cv.contourArea(cnt);
-        
-        // Ignoriere winzige Punkte (Staub/Papierfasern)
-        if (area < 80 || area > (maxR * maxR * 0.4)) continue;
-
-        let moments = cv.moments(cnt);
-        let cx = moments.m10 / moments.m00;
-        let cy = moments.m01 / moments.m00;
-        let dist = Math.sqrt((cx - center.x)**2 + (cy - center.y)**2);
-        
-        if (dist > maxR + 10) continue;
-
-        let onAxis = (Math.abs(cx - center.x) < tol || Math.abs(cy - center.y) < tol);
-
-        if (onAxis) {
-            numberData.push({ area, cx, cy, dist, ring: Math.floor(dist / ringW) });
-            cv.drawContours(dst, contours, i, [0, 255, 0, 255], 2);
-        } else {
-            let circ = (4 * Math.PI * area) / (cv.arcLength(cnt, true) ** 2);
-            // Ein Loch muss runder sein als nur Rauschen
-            if (circ > 0.45) {
-                hits.push({ dist, score: Math.max(0, 11 - Math.floor(dist / ringW + 1)) });
-                cv.circle(dst, new cv.Point(cx, cy), 12, [255, 0, 0, 255], 3);
-            }
-        }
-    }
-
-    // 4. Sonderfall: Flächen-Korrektur (Median)
-    if(numberData.length > 0) {
-        let medianArea = numberData.map(n => n.area).sort((a,b)=>a-b)[Math.floor(numberData.length/2)];
-        numberData.forEach(n => {
-            if (n.area > medianArea * 2.1 || n.area < medianArea * 0.45) {
-                hits.push({ dist: n.dist, score: Math.max(0, 11 - Math.floor(n.dist / ringW + 1)) });
-                cv.circle(dst, new cv.Point(n.cx, n.cy), 15, [255, 255, 0, 255], 3);
-            }
-        });
-    }
-
-    // Endergebnis zeichnen
-    cv.circle(dst, center, maxR, [255, 0, 0, 255], 3);
-    cv.imshow('outputCanvas', dst);
-    
-    // Sidebar Update
-    let total = 0;
-    let html = "";
-    hits.sort((a,b) => b.score - a.score).forEach((h, i) => {
-        total += h.score;
-        html += `<div class="hit-item"><span>Treffer ${i+1}</span> <strong>${h.score} Ringe</strong></div>`;
-    });
-    document.getElementById('totalScore').innerText = total;
-    document.getElementById('hitList').innerHTML = html;
-
-    // Speicher freigeben
-    src.delete(); dst.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete(); M_noise.delete();
-};
-</script>
 </body>
 </html>
-
