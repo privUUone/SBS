@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Schießscheiben Scanner Pro</title>
-    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -16,65 +16,38 @@
             padding: 20px;
             margin: 0;
         }
-        #app-container {
-            width: 100%;
-            max-width: 500px;
-        }
+        #app-container { width: 100%; max-width: 500px; }
         .controls {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: #1e1e1e;
-            padding: 10px 15px;
-            border-radius: 8px;
-            margin-bottom: 15px;
+            display: flex; justify-content: space-between; align-items: center;
+            background: #1e1e1e; padding: 10px 15px; border-radius: 8px; margin-bottom: 15px;
         }
         .controls input {
-            width: 50px;
-            padding: 5px;
-            border-radius: 4px;
-            border: 1px solid #444;
-            background: #333;
-            color: white;
-            text-align: center;
+            width: 50px; padding: 5px; border-radius: 4px;
+            border: 1px solid #444; background: #333; color: white; text-align: center;
         }
         #camera-view, #output-canvas {
-            width: 100%;
-            border-radius: 12px;
-            background-color: #000;
+            width: 100%; border-radius: 12px; background-color: #000;
         }
         #output-canvas { display: none; }
         #hidden-canvas { display: none; }
         
         button {
-            width: 100%;
-            padding: 15px;
-            margin-top: 15px;
-            border: none;
-            border-radius: 8px;
-            font-size: 18px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: 0.3s;
+            width: 100%; padding: 15px; margin-top: 15px; border: none;
+            border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; transition: 0.3s;
         }
         #scan-btn { background-color: #e53935; color: white; }
         #scan-btn:hover { background-color: #d32f2f; }
         #scan-btn:disabled { background-color: #555; cursor: not-allowed; }
         #reset-btn { background-color: #2196f3; color: white; display: none; }
 
+        #processing-indicator {
+            display: none; text-align: center; color: #ffeb3b; margin-top: 10px; font-weight: bold;
+        }
+
         #result-panel {
-            display: none;
-            background-color: #1e1e1e;
-            padding: 20px;
-            border-radius: 12px;
-            margin-top: 20px;
+            display: none; background-color: #1e1e1e; padding: 20px; border-radius: 12px; margin-top: 20px;
         }
-        .result-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 0;
-            border-bottom: 1px solid #333;
-        }
+        .result-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #333; }
         .result-row:last-child { border-bottom: none; font-weight: bold; color: #4caf50; font-size: 1.2em; }
         .error { color: #ff5252; text-align: center; }
     </style>
@@ -93,7 +66,8 @@
         <canvas id="output-canvas"></canvas> 
         <canvas id="hidden-canvas"></canvas>
         
-        <button id="scan-btn" disabled>Lade System...</button>
+        <button id="scan-btn" disabled>Lade OpenCV...</button>
+        <div id="processing-indicator">Analysiere Bild... Bitte warten</div>
         <button id="reset-btn">Neuer Scan</button>
 
         <div id="result-panel">
@@ -111,6 +85,7 @@
         const resultPanel = document.getElementById('result-panel');
         const resultsList = document.getElementById('results-list');
         const ringCountInput = document.getElementById('ring-count');
+        const processingIndicator = document.getElementById('processing-indicator');
 
         let cvReady = false;
         function onOpenCvReady() {
@@ -132,6 +107,7 @@
         startCamera();
 
         scanBtn.addEventListener('click', () => {
+            // 1. Standbild aufnehmen
             hiddenCanvas.width = video.videoWidth;
             hiddenCanvas.height = video.videoHeight;
             outputCanvas.width = video.videoWidth;
@@ -140,12 +116,19 @@
             const ctx = hiddenCanvas.getContext('2d');
             ctx.drawImage(video, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
 
+            // 2. UI aktualisieren (Video weg, Canvas hin, Ladeanzeige an)
             video.style.display = 'none';
             scanBtn.style.display = 'none';
             outputCanvas.style.display = 'block';
-            resetBtn.style.display = 'block';
             
-            processImage();
+            // Zeige das reine Foto sofort an, bevor OpenCV es überschreibt
+            const outCtx = outputCanvas.getContext('2d');
+            outCtx.drawImage(hiddenCanvas, 0, 0);
+            
+            processingIndicator.style.display = 'block';
+            
+            // 3. OpenCV Berechnung verzögern, damit der Browser das UI oben zeichnen kann (Der Freeze-Fix)
+            setTimeout(processImage, 100); 
         });
 
         resetBtn.addEventListener('click', () => {
@@ -164,80 +147,103 @@
             let gray = new cv.Mat();
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
 
-            // 1. Vorverarbeitung für die Scheibe (Rauschen filtern)
+            // PHASE 1: ZIELSCHEIBE FINDEN (Unverändert, da es bei dir gut lief)
             let blurred = new cv.Mat();
             cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 2, 2);
 
-            // --- PHASE 1: ÄUSSERSTEN RING FINDEN ---
             let targetCircles = new cv.Mat();
-            // Parameter für HoughCircles (MÜSSEN OFT ANGEPASST WERDEN!):
-            // dp=1, minDist=100, param1=50, param2=30, minRadius=100, maxRadius=0(unendlich)
             cv.HoughCircles(blurred, targetCircles, cv.HOUGH_GRADIENT, 1, 100, 50, 40, 100, Math.min(src.cols, src.rows)/2);
 
             if (targetCircles.cols === 0) {
-                zeigeFehler("Keine Zielscheibe erkannt. Bitte auf Kontrast und geraden Winkel achten.");
+                beendeVerarbeitung("Keine Zielscheibe erkannt.", src);
                 src.delete(); gray.delete(); blurred.delete(); targetCircles.delete();
-                cv.imshow('output-canvas', src); // Zeigt Originalbild trotzdem
                 return;
             }
 
-            // Wir nehmen den besten/stärksten gefundenen Kreis als unsere Zielscheibe
             let targetX = targetCircles.data32F[0];
             let targetY = targetCircles.data32F[1];
             let targetRadius = targetCircles.data32F[2];
+            let targetArea = Math.PI * targetRadius * targetRadius;
             let ringWidth = targetRadius / numRings;
 
-            // Scheibe auf Output-Canvas zeichnen (Grün)
+            // Zeichne grüne Zielscheibe
             cv.circle(src, new cv.Point(targetX, targetY), targetRadius, [0, 255, 0, 255], 3);
 
-            // --- PHASE 2: EINSCHUSSLÖCHER FINDEN ---
-            // Wir nutzen Adaptive Thresholding, um Kontraste (schwarz auf schwarz / weiß auf schwarz) zu betonen
-            let thresh = new cv.Mat();
-            cv.adaptiveThreshold(gray, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
+            // PHASE 2: LÖCHER FINDEN (Neu: Blob-Detection statt Hough)
             
-            let holeCircles = new cv.Mat();
-            // Suche nach sehr kleinen Kreisen (Löchern/Pflastern)
-            // minRadius=3, maxRadius=targetRadius/10 (Ein Loch ist meist kleiner als eine Ringbreite)
-            cv.HoughCircles(gray, holeCircles, cv.HOUGH_GRADIENT, 1, 10, 50, 15, 3, targetRadius/6);
+            // Adaptive Threshold: Wandelt das Bild in starkes Schwarz/Weiß um. Dunkle Löcher werden hervorgehoben.
+            let thresh = new cv.Mat();
+            cv.adaptiveThreshold(gray, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 21, 15);
+
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            // Finde alle zusammenhängenden Formen im Schwarz-Weiß-Bild
+            cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
             let ermittelteTreffer = [];
 
-            for (let i = 0; i < holeCircles.cols; ++i) {
-                let hX = holeCircles.data32F[i * 3];
-                let hY = holeCircles.data32F[i * 3 + 1];
-                let hR = holeCircles.data32F[i * 3 + 2];
+            for (let i = 0; i < contours.size(); ++i) {
+                let contour = contours.get(i);
+                let area = cv.contourArea(contour);
 
-                // Distanz zum Zentrum berechnen (Satz des Pythagoras)
-                let distance = Math.sqrt(Math.pow(hX - targetX, 2) + Math.pow(hY - targetY, 2));
+                // Filter 1: Ist die Fläche realistisch für ein Loch?
+                // Annahme: Ein Loch ist zwischen 0.05% und 2% der gesamten Scheibenfläche.
+                let minHoleArea = targetArea * 0.0005; 
+                let maxHoleArea = targetArea * 0.02;
 
-                // Gehört das Loch überhaupt noch zur Scheibe?
-                if (distance <= targetRadius) {
-                    // Punktzahl berechnen: 
-                    // Distanz 0 = RingCount (z.B. 10). Distanz = TargetRadius = Ring 1.
-                    let ringHit = numRings - Math.floor(distance / ringWidth);
-                    if (ringHit < 1) ringHit = 1; // Falls es genau auf der Kante liegt
-                    if (ringHit > numRings) ringHit = numRings; // Perfektes Zentrum
+                if (area > minHoleArea && area < maxHoleArea) {
                     
-                    ermittelteTreffer.push(ringHit);
+                    // Filter 2: Ist es rund? (Circularity berechnen)
+                    let perimeter = cv.arcLength(contour, true);
+                    let circularity = 0;
+                    if (perimeter > 0) {
+                        circularity = (4 * Math.PI * area) / (perimeter * perimeter);
+                    }
 
-                    // Loch auf Output-Canvas markieren (Rot)
-                    cv.circle(src, new cv.Point(hX, hY), hR, [255, 0, 0, 255], 2);
-                    // Trefferwert an das Loch schreiben
-                    cv.putText(src, ringHit.toString(), new cv.Point(hX + 10, hY - 10), cv.FONT_HERSHEY_SIMPLEX, 0.8, [255, 0, 0, 255], 2);
+                    // Ein echter Kreis hat 1.0. Wir akzeptieren alles über 0.6 (da Löcher ausgefranst sind)
+                    if (circularity > 0.6) {
+                        
+                        // Mittelpunkt des Lochs berechnen (Moments)
+                        let M = cv.moments(contour);
+                        let cX = M.m10 / M.m00;
+                        let cY = M.m01 / M.m00;
+
+                        // Filter 3: Liegt das Loch innerhalb der Zielscheibe?
+                        let distance = Math.sqrt(Math.pow(cX - targetX, 2) + Math.pow(cY - targetY, 2));
+                        
+                        if (distance <= targetRadius) {
+                            // PUNKTZAHL BERECHNEN
+                            let ringHit = numRings - Math.floor(distance / ringWidth);
+                            if (ringHit < 1) ringHit = 1;
+                            if (ringHit > numRings) ringHit = numRings;
+                            
+                            ermittelteTreffer.push(ringHit);
+
+                            // Treffer auf Bild markieren
+                            cv.circle(src, new cv.Point(cX, cY), Math.sqrt(area/Math.PI), [255, 0, 0, 255], 3); // Roter Kreis
+                            cv.putText(src, ringHit.toString(), new cv.Point(cX + 15, cY - 15), cv.FONT_HERSHEY_SIMPLEX, 0.9, [255, 0, 0, 255], 2);
+                        }
+                    }
                 }
             }
 
-            // Bild mit Markierungen im Browser anzeigen
+            // Bild zeichnen und UI aufräumen
             cv.imshow('output-canvas', src);
+            processingIndicator.style.display = 'none';
+            resetBtn.style.display = 'block';
 
-            // Ergebnisse auflisten
             zeigeAuswertung(ermittelteTreffer, numRings);
 
-            // Speicher freigeben (Wichtig in C/C++ basierten Libraries wie OpenCV)
-            src.delete(); gray.delete(); blurred.delete(); targetCircles.delete(); thresh.delete(); holeCircles.delete();
+            // Speicher freigeben (Verhindert Abstürze)
+            src.delete(); gray.delete(); blurred.delete(); targetCircles.delete(); 
+            thresh.delete(); contours.delete(); hierarchy.delete();
         }
 
-        function zeigeFehler(msg) {
+        function beendeVerarbeitung(msg, srcImage) {
+            processingIndicator.style.display = 'none';
+            resetBtn.style.display = 'block';
+            if (srcImage) cv.imshow('output-canvas', srcImage);
+            
             resultsList.innerHTML = `<div class="error"><p>⚠️ ${msg}</p></div>`;
             resultPanel.style.display = 'block';
         }
@@ -246,7 +252,7 @@
             resultsList.innerHTML = '';
             
             if (trefferArray.length === 0) {
-                resultsList.innerHTML = `<div class="error"><p>Scheibe erkannt, aber keine Einschusslöcher gefunden.</p></div>`;
+                resultsList.innerHTML = `<div class="error"><p>Scheibe erkannt, aber keine gültigen Einschusslöcher gefunden.</p></div>`;
                 resultPanel.style.display = 'block';
                 return;
             }
