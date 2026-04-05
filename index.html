@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Schießscheiben Scanner</title>
+    <title>Schießscheiben Scanner Pro</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #1e1e1e;
+            background-color: #121212;
             color: #ffffff;
             display: flex;
             flex-direction: column;
@@ -16,91 +16,102 @@
             padding: 20px;
             margin: 0;
         }
-        h1 { margin-bottom: 10px; }
         #app-container {
             width: 100%;
             max-width: 500px;
-            position: relative;
         }
-        #camera-view {
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #1e1e1e;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        .controls input {
+            width: 50px;
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #444;
+            background: #333;
+            color: white;
+            text-align: center;
+        }
+        #camera-view, #output-canvas {
             width: 100%;
             border-radius: 12px;
             background-color: #000;
-            display: block;
         }
-        /* Unsichtbares Canvas für die Bildaufnahme */
+        #output-canvas { display: none; }
         #hidden-canvas { display: none; }
         
-        #scan-btn {
+        button {
             width: 100%;
             padding: 15px;
-            margin-top: 20px;
-            background-color: #e53935;
-            color: white;
+            margin-top: 15px;
             border: none;
             border-radius: 8px;
             font-size: 18px;
             font-weight: bold;
             cursor: pointer;
-            transition: background-color 0.3s;
+            transition: 0.3s;
         }
+        #scan-btn { background-color: #e53935; color: white; }
         #scan-btn:hover { background-color: #d32f2f; }
         #scan-btn:disabled { background-color: #555; cursor: not-allowed; }
+        #reset-btn { background-color: #2196f3; color: white; display: none; }
 
-        /* Auswertungspanel */
         #result-panel {
             display: none;
-            background-color: #2c2c2c;
+            background-color: #1e1e1e;
             padding: 20px;
             border-radius: 12px;
             margin-top: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
         .result-row {
             display: flex;
             justify-content: space-between;
             padding: 8px 0;
-            border-bottom: 1px solid #444;
+            border-bottom: 1px solid #333;
         }
-        .result-row:last-child { border-bottom: none; font-weight: bold; font-size: 1.2em; color: #4caf50; }
-        #reset-btn {
-            width: 100%;
-            padding: 10px;
-            margin-top: 15px;
-            background-color: #2196f3;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            cursor: pointer;
-        }
+        .result-row:last-child { border-bottom: none; font-weight: bold; color: #4caf50; font-size: 1.2em; }
+        .error { color: #ff5252; text-align: center; }
     </style>
 </head>
 <body>
 
-    <h1>Scheiben-Scanner</h1>
     <div id="app-container">
+        <h2>Scanner</h2>
+        
+        <div class="controls">
+            <label for="ring-count">Anzahl der Ringe:</label>
+            <input type="number" id="ring-count" value="10" min="1" max="20">
+        </div>
+
         <video id="camera-view" autoplay playsinline></video>
+        <canvas id="output-canvas"></canvas> 
         <canvas id="hidden-canvas"></canvas>
         
-        <button id="scan-btn" disabled>Lade OpenCV...</button>
+        <button id="scan-btn" disabled>Lade System...</button>
+        <button id="reset-btn">Neuer Scan</button>
 
         <div id="result-panel">
-            <h2>Auswertung</h2>
+            <h3>Auswertung</h3>
             <div id="results-list"></div>
-            <button id="reset-btn">Neuer Scan</button>
         </div>
     </div>
 
     <script>
         const video = document.getElementById('camera-view');
-        const canvas = document.getElementById('hidden-canvas');
+        const hiddenCanvas = document.getElementById('hidden-canvas');
+        const outputCanvas = document.getElementById('output-canvas');
         const scanBtn = document.getElementById('scan-btn');
+        const resetBtn = document.getElementById('reset-btn');
         const resultPanel = document.getElementById('result-panel');
         const resultsList = document.getElementById('results-list');
-        const resetBtn = document.getElementById('reset-btn');
+        const ringCountInput = document.getElementById('ring-count');
 
-        // OpenCV Lade-Status
         let cvReady = false;
         function onOpenCvReady() {
             cvReady = true;
@@ -108,95 +119,158 @@
             scanBtn.disabled = false;
         }
 
-        // Kamera starten
         async function startCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment' } // Nutzt die Rückkamera auf Handys
+                    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
                 });
                 video.srcObject = stream;
             } catch (err) {
-                alert("Fehler beim Kamerazugriff: " + err);
+                alert("Kamerafehler: " + err);
             }
         }
-
         startCamera();
 
-        // Scan Button Logik
         scanBtn.addEventListener('click', () => {
-            // 1. Bild in Originalauflösung auf Canvas zeichnen
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            hiddenCanvas.width = video.videoWidth;
+            hiddenCanvas.height = video.videoHeight;
+            outputCanvas.width = video.videoWidth;
+            outputCanvas.height = video.videoHeight;
+            
+            const ctx = hiddenCanvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
 
-            // 2. UI umstellen
             video.style.display = 'none';
             scanBtn.style.display = 'none';
+            outputCanvas.style.display = 'block';
+            resetBtn.style.display = 'block';
             
-            // 3. Bildauswertung starten
             processImage();
         });
 
-        // Reset Button Logik
         resetBtn.addEventListener('click', () => {
             resultPanel.style.display = 'none';
+            outputCanvas.style.display = 'none';
+            resetBtn.style.display = 'none';
             video.style.display = 'block';
             scanBtn.style.display = 'block';
         });
 
-        // --- BILDVERARBEITUNG ---
         function processImage() {
             if (!cvReady) return;
 
-            /* Hier würde die ECHTE OpenCV.js Logik stehen. 
-               Da diese stark von Licht, Kontrast und der spezifischen 
-               Zielscheibe abhängt, ist hier die mathematische Simulation 
-               sowie die Erklärung der Schritte implementiert.
-            */
-            
-            // Schritt 1: Bild einlesen
-            // let src = cv.imread(canvas);
-            // let gray = new cv.Mat();
-            // cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+            const numRings = parseInt(ringCountInput.value);
+            let src = cv.imread(hiddenCanvas);
+            let gray = new cv.Mat();
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
 
-            // Schritt 2: Zentrum der Scheibe finden (HoughCircles)
-            // cv.HoughCircles(gray, circles, cv.HOUGH_GRADIENT, ...);
+            // 1. Vorverarbeitung für die Scheibe (Rauschen filtern)
+            let blurred = new cv.Mat();
+            cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 2, 2);
+
+            // --- PHASE 1: ÄUSSERSTEN RING FINDEN ---
+            let targetCircles = new cv.Mat();
+            // Parameter für HoughCircles (MÜSSEN OFT ANGEPASST WERDEN!):
+            // dp=1, minDist=100, param1=50, param2=30, minRadius=100, maxRadius=0(unendlich)
+            cv.HoughCircles(blurred, targetCircles, cv.HOUGH_GRADIENT, 1, 100, 50, 40, 100, Math.min(src.cols, src.rows)/2);
+
+            if (targetCircles.cols === 0) {
+                zeigeFehler("Keine Zielscheibe erkannt. Bitte auf Kontrast und geraden Winkel achten.");
+                src.delete(); gray.delete(); blurred.delete(); targetCircles.delete();
+                cv.imshow('output-canvas', src); // Zeigt Originalbild trotzdem
+                return;
+            }
+
+            // Wir nehmen den besten/stärksten gefundenen Kreis als unsere Zielscheibe
+            let targetX = targetCircles.data32F[0];
+            let targetY = targetCircles.data32F[1];
+            let targetRadius = targetCircles.data32F[2];
+            let ringWidth = targetRadius / numRings;
+
+            // Scheibe auf Output-Canvas zeichnen (Grün)
+            cv.circle(src, new cv.Point(targetX, targetY), targetRadius, [0, 255, 0, 255], 3);
+
+            // --- PHASE 2: EINSCHUSSLÖCHER FINDEN ---
+            // Wir nutzen Adaptive Thresholding, um Kontraste (schwarz auf schwarz / weiß auf schwarz) zu betonen
+            let thresh = new cv.Mat();
+            cv.adaptiveThreshold(gray, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
             
-            // Schritt 3: Einschusslöcher finden (Blob Detection oder Thresholding)
-            // cv.threshold(gray, binary, 100, 255, cv.THRESH_BINARY_INV);
-            
-            // --- SIMULIERTE ERGEBNISSE FÜR DEMO-ZWECKE ---
-            // In der Realität werden diese Treffer durch die Distanz 
-            // zum errechneten Mittelpunkt der Scheibe ermittelt.
-            const ermittelteTreffer = [10, 10, 9, 8, 8, 5]; 
-            zeigeAuswertung(ermittelteTreffer);
+            let holeCircles = new cv.Mat();
+            // Suche nach sehr kleinen Kreisen (Löchern/Pflastern)
+            // minRadius=3, maxRadius=targetRadius/10 (Ein Loch ist meist kleiner als eine Ringbreite)
+            cv.HoughCircles(gray, holeCircles, cv.HOUGH_GRADIENT, 1, 10, 50, 15, 3, targetRadius/6);
+
+            let ermittelteTreffer = [];
+
+            for (let i = 0; i < holeCircles.cols; ++i) {
+                let hX = holeCircles.data32F[i * 3];
+                let hY = holeCircles.data32F[i * 3 + 1];
+                let hR = holeCircles.data32F[i * 3 + 2];
+
+                // Distanz zum Zentrum berechnen (Satz des Pythagoras)
+                let distance = Math.sqrt(Math.pow(hX - targetX, 2) + Math.pow(hY - targetY, 2));
+
+                // Gehört das Loch überhaupt noch zur Scheibe?
+                if (distance <= targetRadius) {
+                    // Punktzahl berechnen: 
+                    // Distanz 0 = RingCount (z.B. 10). Distanz = TargetRadius = Ring 1.
+                    let ringHit = numRings - Math.floor(distance / ringWidth);
+                    if (ringHit < 1) ringHit = 1; // Falls es genau auf der Kante liegt
+                    if (ringHit > numRings) ringHit = numRings; // Perfektes Zentrum
+                    
+                    ermittelteTreffer.push(ringHit);
+
+                    // Loch auf Output-Canvas markieren (Rot)
+                    cv.circle(src, new cv.Point(hX, hY), hR, [255, 0, 0, 255], 2);
+                    // Trefferwert an das Loch schreiben
+                    cv.putText(src, ringHit.toString(), new cv.Point(hX + 10, hY - 10), cv.FONT_HERSHEY_SIMPLEX, 0.8, [255, 0, 0, 255], 2);
+                }
+            }
+
+            // Bild mit Markierungen im Browser anzeigen
+            cv.imshow('output-canvas', src);
+
+            // Ergebnisse auflisten
+            zeigeAuswertung(ermittelteTreffer, numRings);
+
+            // Speicher freigeben (Wichtig in C/C++ basierten Libraries wie OpenCV)
+            src.delete(); gray.delete(); blurred.delete(); targetCircles.delete(); thresh.delete(); holeCircles.delete();
         }
 
-        function zeigeAuswertung(trefferArray) {
-            // Treffer zählen
-            const punkteZaehler = { 10:0, 9:0, 8:0, 7:0, 6:0, 5:0, 4:0, 3:0, 2:0, 1:0 };
+        function zeigeFehler(msg) {
+            resultsList.innerHTML = `<div class="error"><p>⚠️ ${msg}</p></div>`;
+            resultPanel.style.display = 'block';
+        }
+
+        function zeigeAuswertung(trefferArray, numRings) {
+            resultsList.innerHTML = '';
+            
+            if (trefferArray.length === 0) {
+                resultsList.innerHTML = `<div class="error"><p>Scheibe erkannt, aber keine Einschusslöcher gefunden.</p></div>`;
+                resultPanel.style.display = 'block';
+                return;
+            }
+
+            const punkteZaehler = {};
             let gesamtPunkte = 0;
 
             trefferArray.forEach(punkt => {
-                if(punkteZaehler[punkt] !== undefined) punkteZaehler[punkt]++;
+                punkteZaehler[punkt] = (punkteZaehler[punkt] || 0) + 1;
                 gesamtPunkte += punkt;
             });
 
-            // UI aufbauen
-            resultsList.innerHTML = '';
-            for (let i = 10; i >= 1; i--) {
+            for (let i = numRings; i >= 1; i--) {
                 if (punkteZaehler[i] > 0) {
                     const row = document.createElement('div');
                     row.className = 'result-row';
-                    row.innerHTML = `<span>${i}er Ring:</span> <span>${punkteZaehler[i]}x getroffen</span>`;
+                    row.innerHTML = `<span>${i}er Ring:</span> <span>${punkteZaehler[i]}x</span>`;
                     resultsList.appendChild(row);
                 }
             }
 
             const totalRow = document.createElement('div');
             totalRow.className = 'result-row';
-            totalRow.innerHTML = `<span>Gesamtpunktzahl:</span> <span>${gesamtPunkte}</span>`;
+            totalRow.innerHTML = `<span>Gesamtpunkte:</span> <span>${gesamtPunkte}</span>`;
             resultsList.appendChild(totalRow);
 
             resultPanel.style.display = 'block';
@@ -204,3 +278,4 @@
     </script>
 </body>
 </html>
+
