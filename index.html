@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TargetScan V22 - Debug Edition</title>
+    <title>TargetScan V23 - Hybrid Precision</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
     <style>
         body { font-family: sans-serif; background: #111; color: white; padding: 10px; display: flex; flex-direction: column; align-items: center; }
@@ -17,7 +17,7 @@
         .input-group { display: flex; flex-direction: column; }
         input { background: #333; color: white; border: 1px solid #555; padding: 4px; border-radius: 4px; }
         #status { text-align: center; color: #ffeb3b; margin: 8px 0; font-weight: bold; font-size: 0.9em; }
-        h4 { margin: 10px 0 5px 0; font-size: 0.9em; color: #aaa; text-transform: uppercase; }
+        h4 { margin: 10px 0 2px 0; font-size: 0.8em; color: #aaa; text-transform: uppercase; }
     </style>
 </head>
 <body>
@@ -25,22 +25,23 @@
     <div id="app-container">
         <div class="card">
             <div class="input-grid">
-                <div class="input-group"><label>Ringe (z.B. 5):</label><input type="number" id="ring-count" value="5"></div>
+                <div class="input-group"><label>Ringe (z.B. 6):</label><input type="number" id="ring-count" value="6"></div>
                 <div class="input-group"><label>Hauptfarben:</label><input type="number" id="color-count" value="2"></div>
-                <div class="input-group"><label>Ignorier-Stufen:</label><input type="number" id="color-range" value="25"></div>
-                <div class="input-group"><label>Loch-Stufen:</label><input type="number" id="hole-range" value="15"></div>
+                <div class="input-group"><label>Ignorier-Breite:</label><input type="number" id="color-range" value="25"></div>
+                <div class="input-group"><label>Loch-Farbbereich:</label><input type="number" id="hole-range" value="15"></div>
                 <div class="input-group"><label>Mindest-Fläche %:</label><input type="number" id="min-area-pct" step="0.05" value="0.15"></div>
-                <div class="input-group"><label>Empfindlichkeit %:</label><input type="number" id="sensitivity" step="0.05" value="0.2"></div>
+                <div class="input-group"><label>Rundheit (0.1-1.0):</label><input type="number" id="min-circ" step="0.1" value="0.6"></div>
             </div>
             <div id="status">Warte auf OpenCV...</div>
         </div>
 
-        <h4>Kamera / Ergebnis</h4>
         <video id="camera-view" autoplay playsinline></video>
         <canvas id="output-canvas" class="hidden"></canvas>
         
         <div id="debug-area" class="hidden">
-            <h4>Analyse-Maske (Was der PC sieht)</h4>
+            <h4>1. Graustufen (Kamerasicht)</h4>
+            <canvas id="gray-preview"></canvas>
+            <h4>2. Analyse-Maske (Loch-Kandidaten)</h4>
             <canvas id="debug-canvas"></canvas>
         </div>
         
@@ -56,20 +57,21 @@
         const video = document.getElementById('camera-view');
         const outputCanvas = document.getElementById('output-canvas');
         const debugCanvas = document.getElementById('debug-canvas');
+        const grayCanvas = document.getElementById('gray-preview');
         const scanBtn = document.getElementById('scan-btn');
         const status = document.getElementById('status');
 
         let cvReady = false;
         function onOpenCvReady() {
             cvReady = true;
-            status.innerText = "System bereit";
+            status.innerText = "Bereit";
             navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } })
                 .then(s => { video.srcObject = s; video.onloadedmetadata = () => { scanBtn.disabled = false; }; });
         }
 
         scanBtn.addEventListener('click', async () => {
             if (!cvReady || video.videoWidth === 0) return;
-            scanBtn.disabled = true; status.innerText = "Analysiere...";
+            scanBtn.disabled = true; status.innerText = "Suche Scheibe...";
             await new Promise(r => setTimeout(r, 100));
 
             try {
@@ -80,27 +82,20 @@
                 let gray = new cv.Mat();
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
                 
-                // 1. Karte finden via Canny
-                let edges = new cv.Mat();
-                cv.Canny(gray, edges, 60, 120);
-                let contours = new cv.MatVector();
-                let hierarchy = new cv.Mat();
-                cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                // PHASE 1: Kreissuche via Hough (wie in deinem V3)
+                let blurred = new cv.Mat();
+                cv.GaussianBlur(gray, blurred, new cv.Size(7, 7), 0);
+                let circles = new cv.Mat();
+                cv.HoughCircles(blurred, circles, cv.HOUGH_GRADIENT, 1, 100, 50, 35, 100, 0);
 
-                let maxArea = 0, targetCircle = null;
-                for (let i = 0; i < contours.size(); ++i) {
-                    let cnt = contours.get(i);
-                    let area = cv.contourArea(cnt);
-                    let circle = cv.minEnclosingCircle(cnt);
-                    if (area > maxArea && area / (Math.PI * circle.radius**2) > 0.6) {
-                        maxArea = area; targetCircle = circle;
-                    }
-                }
-                if (!targetCircle) throw new Error("Keine Karte im Bild!");
+                if (circles.cols === 0) throw new Error("Keine runde Scheibe gefunden!");
 
-                // 2. Crop auf 512x512
-                let tr = targetCircle.radius;
-                let rect = new cv.Rect(targetCircle.center.x - tr, targetCircle.center.y - tr, tr * 2, tr * 2);
+                let tx = circles.data32F[0];
+                let ty = circles.data32F[1];
+                let tr = circles.data32F[2];
+
+                // PHASE 2: Normalisierter Crop (512x512)
+                let rect = new cv.Rect(tx - tr, ty - tr, tr * 2, tr * 2);
                 rect.x = Math.max(0, rect.x); rect.y = Math.max(0, rect.y);
                 rect.width = Math.min(src.cols - rect.x, rect.width); rect.height = Math.min(src.rows - rect.y, rect.height);
                 
@@ -108,8 +103,9 @@
                 cv.resize(src.roi(rect), target, new cv.Size(512, 512), 0, 0, cv.INTER_AREA);
                 let gray512 = new cv.Mat();
                 cv.cvtColor(target, gray512, cv.COLOR_RGBA2GRAY, 0);
+                cv.imshow('gray-preview', gray512); // Graubild anzeigen
 
-                // 3. Histogramm-Filterung
+                // PHASE 3: Histogramm & Farben filtern
                 let mask = cv.Mat.zeros(512, 512, cv.CV_8U);
                 cv.circle(mask, new cv.Point(256, 256), 250, [255, 255, 255, 255], -1);
                 let totalPx = Math.PI * 250 * 250;
@@ -119,7 +115,6 @@
                 cv.calcHist(srcVec, [0], mask, hist, [256], [0, 256]);
                 let tempHist = Array.from(hist.data32F);
 
-                // Hauptfarben eliminieren (sehr aggressiv)
                 let cardColors = parseInt(document.getElementById('color-count').value);
                 let colorRange = parseInt(document.getElementById('color-range').value);
                 for(let c = 0; c < cardColors; c++) {
@@ -128,16 +123,15 @@
                     for(let i = Math.max(0, maxIdx - colorRange); i <= Math.min(255, maxIdx + colorRange); i++) tempHist[i] = 0;
                 }
 
-                // Löcher finden via Sliding Window
+                // PHASE 4: Räumliche Analyse
                 let isHoleBin = new Array(256).fill(false);
                 let holeRange = parseInt(document.getElementById('hole-range').value);
-                let sens = parseFloat(document.getElementById('sensitivity').value) / 100;
+                let sens = 0.002; // Fest verdrahtet für Stabilität
                 for(let i = 0; i <= (256 - holeRange); i++) {
                     let sum = 0; for(let j = 0; j < holeRange; j++) sum += tempHist[i+j];
                     if ((sum / totalPx) > sens) { for(let j = 0; j < holeRange; j++) isHoleBin[i+j] = true; }
                 }
 
-                // 4. Maske & Debug-Bild
                 let holeMask = cv.Mat.zeros(512, 512, cv.CV_8U);
                 for(let i=0; i<256; i++) {
                     if(isHoleBin[i]) {
@@ -150,25 +144,33 @@
                     }
                 }
                 cv.bitwise_and(holeMask, mask, holeMask);
-                cv.imshow('debug-canvas', holeMask); // Hier siehst du das "Skelett" der Erkennung
+                cv.imshow('debug-canvas', holeMask);
 
-                // 5. Treffer zählen
                 let holeContours = new cv.MatVector();
                 let hH = new cv.Mat();
                 cv.findContours(holeMask, holeContours, hH, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
                 let treffer = [];
                 let ringCount = parseInt(document.getElementById('ring-count').value);
-                let minAreaThreshold = parseFloat(document.getElementById('min-area-pct').value) / 100;
+                let minArea = parseFloat(document.getElementById('min-area-pct').value) / 100;
+                let minCirc = parseFloat(document.getElementById('min-circ').value);
                 let ringWidth = 250 / ringCount;
 
                 for (let i = 0; i < holeContours.size(); ++i) {
                     let cnt = holeContours.get(i);
                     let area = cv.contourArea(cnt);
-                    if (area > (totalPx * minAreaThreshold)) { 
+                    let perimeter = cv.arcLength(cnt, true);
+                    let circularity = (4 * Math.PI * area) / (perimeter * perimeter);
+
+                    // FILTER LOGIK
+                    if (area > (totalPx * minArea) && circularity > minCirc) {
                         let M = cv.moments(cnt);
                         let cx = M.m10/M.m00, cy = M.m01/M.m00;
                         let dist = Math.hypot(cx - 256, cy - 256);
+
+                        // Spezial-Check: Wenn das Objekt riesig ist und im Zentrum sitzt -> Wahrscheinlich das weiße Zentrum
+                        if (dist < 30 && area > (totalPx * 0.05)) continue; 
+
                         let punkte = 10 - Math.floor(dist / ringWidth);
                         treffer.push(Math.max(10 - ringCount + 1, Math.min(10, punkte)));
                         cv.circle(target, new cv.Point(cx, cy), 15, [0, 255, 0, 255], 3);
@@ -181,10 +183,11 @@
                 document.getElementById('debug-area').classList.remove('hidden');
                 document.getElementById('result-panel').classList.remove('hidden');
                 zeige(treffer);
-                status.innerText = "Scan abgeschlossen!";
+                status.innerText = "Ergebnis berechnet";
                 document.getElementById('reset-btn').classList.remove('hidden');
 
-                [src, gray, edges, contours, hierarchy, target, gray512, mask, hist, holeMask, holeContours, hH].forEach(m => { if(m) m.delete(); });
+                // Cleanup
+                [src, gray, blurred, circles, target, gray512, mask, hist, holeMask, holeContours, hH].forEach(m => { if(m) m.delete(); });
             } catch (e) {
                 status.innerText = "Fehler: " + e.message;
                 scanBtn.disabled = false;
@@ -195,10 +198,10 @@
             const l = document.getElementById('results-list');
             l.innerHTML = ""; let s = 0;
             t.sort((a,b) => b-a).forEach(p => { 
-                l.innerHTML += `<div class="res"><span>Ring ${p}</span><span>1x</span></div>`;
+                l.innerHTML += `<div class="result-row"><span>Ring ${p}</span><span>1x</span></div>`;
                 s += p;
             });
-            l.innerHTML += `<div class="res" style="font-weight:bold; color:#4caf50; font-size:1.2em;"><span>Gesamt</span><span>${s}</span></div>`;
+            l.innerHTML += `<div class="result-row" style="font-weight:bold; color:#4caf50; font-size:1.2em;"><span>Gesamt</span><span>${s}</span></div>`;
         }
         document.getElementById('reset-btn').onclick = () => location.reload();
     </script>
