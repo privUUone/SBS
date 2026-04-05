@@ -3,19 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TargetScan V5 - Histogram Logic</title>
+    <title>TargetScan Pro V6 - Adaptive Histogram</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
     <style>
         body { font-family: sans-serif; background: #121212; color: white; display: flex; flex-direction: column; align-items: center; padding: 10px; margin: 0; }
         #app-container { width: 100%; max-width: 450px; }
-        .controls { background: #1e1e1e; padding: 15px; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; }
-        input { width: 60px; padding: 8px; border-radius: 6px; border: 1px solid #444; background: #333; color: white; text-align: center; }
+        .controls { background: #1e1e1e; padding: 15px; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        input { width: 50px; padding: 8px; border-radius: 6px; border: 1px solid #444; background: #333; color: white; text-align: center; }
         video, canvas { width: 100%; border-radius: 12px; background: #000; display: block; }
         #output-canvas, #hidden-canvas { display: none; }
         button { width: 100%; padding: 18px; margin-top: 10px; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; }
         #scan-btn { background: #e53935; color: white; }
         #reset-btn { background: #2196f3; color: white; display: none; }
-        #status { text-align: center; margin: 10px; color: #ffeb3b; }
+        #status { text-align: center; margin: 10px; color: #ffeb3b; font-weight: bold; }
         #result-panel { display: none; background: #1e1e1e; padding: 15px; border-radius: 12px; margin-top: 10px; width: 100%; box-sizing: border-box; }
         .result-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #333; }
         .total { font-weight: bold; color: #4caf50; font-size: 1.2em; }
@@ -25,17 +25,17 @@
 
     <div id="app-container">
         <div class="controls">
-            <div><label>Ringe:</label> <input type="number" id="ring-count" value="6"></div>
-            <div id="ring-info" style="font-size: 0.8em; color: #aaa;">Mitte=10, Außen=5</div>
+            <label>Anzahl Ringe:</label>
+            <input type="number" id="ring-count" value="6">
         </div>
 
         <video id="camera-view" autoplay playsinline></video>
         <canvas id="output-canvas"></canvas>
         <canvas id="hidden-canvas"></canvas>
         
-        <div id="status">Warte auf OpenCV...</div>
+        <div id="status">Lade OpenCV...</div>
         <button id="scan-btn" disabled>Scan starten</button>
-        <button id="reset-btn">Neuer Scan</button>
+        <button id="reset-btn">Nächster Scan</button>
 
         <div id="result-panel">
             <div id="results-list"></div>
@@ -64,7 +64,7 @@
             hiddenCanvas.getContext('2d').drawImage(video, 0, 0);
             video.style.display = 'none';
             scanBtn.style.display = 'none';
-            status.innerText = "Berechne Graustufen...";
+            status.innerText = "Analysiere Histogramm...";
             outputCanvas.style.display = 'block';
             setTimeout(processImage, 100);
         });
@@ -74,113 +74,122 @@
         function processImage() {
             let src = cv.imread(hiddenCanvas);
             let dst = new cv.Mat();
-            // Downscale auf 512x512 für Stabilität
-            cv.resize(src, dst, new cv.Size(512, 512), 0, 0, cv.INTER_AREA);
+            cv.resize(src, dst, new cv.Size(600, Math.round(600 * src.rows / src.cols)), 0, 0, cv.INTER_AREA);
             
             let gray = new cv.Mat();
             cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY, 0);
 
-            // SCHRITT 1: ÄUSSERSTEN RING FINDEN (Adaptive Threshold für dünne Linien)
-            let binary = new cv.Mat();
-            cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 21, 10);
+            // 1. ZIELSCHEIBE FINDEN (HoughCircles - wie gewünscht)
+            let blurred = new cv.Mat();
+            cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 2, 2);
+            let circles = new cv.Mat();
+            cv.HoughCircles(blurred, circles, cv.HOUGH_GRADIENT, 1, 100, 50, 40, 100, 0);
 
-            let contours = new cv.MatVector();
-            let hierarchy = new cv.Mat();
-            cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-            let target = null;
-            let maxArea = 0;
-            for (let i = 0; i < contours.size(); ++i) {
-                let cnt = contours.get(i);
-                let area = cv.contourArea(cnt);
-                // Suche die größte Kontur, die fast quadratisch ist
-                if (area > maxArea && area > 10000) {
-                    let rect = cv.boundingRect(cnt);
-                    let ratio = rect.width / rect.height;
-                    if (ratio > 0.7 && ratio < 1.3) {
-                        maxArea = area;
-                        target = { x: rect.x + rect.width/2, y: rect.y + rect.height/2, r: (rect.width + rect.height)/4, rect: rect };
-                    }
-                }
-            }
-
-            if (!target) {
-                status.innerText = "Fehler: Äußerer Ring nicht erkannt!";
+            if (circles.cols === 0) {
+                status.innerText = "Außenring nicht gefunden!";
                 resetBtn.style.display = "block";
                 return;
             }
 
-            // SCHRITT 2: GRAUSTUFEN-SAMPLING INNERHALB DER SCHEIBE
-            // Wir erstellen eine Maske für das Innere der Scheibe
+            let tx = circles.data32F[0];
+            let ty = circles.data32F[1];
+            let tr = circles.data32F[2];
+
+            // 2. ADAPTIVE GRAUSTUFEN-ANALYSE
+            // Wir schauen uns nur die Pixel innerhalb der Scheibe an
             let mask = cv.Mat.zeros(gray.rows, gray.cols, cv.CV_8U);
-            cv.circle(mask, new cv.Point(target.x, target.y), target.r, [255, 255, 255, 255], -1);
-            
-            // Berechne Durchschnittshelligkeit des Papiers
-            let mean = cv.mean(gray, mask)[0]; 
-            
-            // Löcher sind DEUTLICH dunkler (z.B. Hintergrund oder Schatten im Loch)
-            // Alles, was z.B. 40 Einheiten dunkler als der Durchschnitt ist
-            let holeThresh = new cv.Mat();
-            cv.threshold(gray, holeThresh, mean - 50, 255, cv.THRESH_BINARY_INV);
-            
-            // Maskiere den Bereich außerhalb der Scheibe weg
-            let maskedHoles = new cv.Mat();
-            cv.bitwise_and(holeThresh, mask, maskedHoles);
+            cv.circle(mask, new cv.Point(tx, ty), tr, [255, 255, 255, 255], -1);
 
-            // SCHRITT 3: LOCH-CLUSTER ANALYSIEREN
-            let holeContours = new cv.MatVector();
-            cv.findContours(maskedHoles, holeContours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            // Histogramm erstellen (256 Graustufen)
+            let hist = new cv.Mat();
+            let maskVec = new cv.MatVector(); maskVec.push_back(mask);
+            let channels = [0];
+            let histSize = [256];
+            let ranges = [0, 256];
+            cv.calcHist(maskVec, channels, mask, hist, histSize, ranges);
 
-            let numRings = parseInt(document.getElementById('ring-count').value);
-            let ringW = target.r / numRings;
-            let treffer = [];
-            let holeAreas = [];
+            // Graustufen in 16 Gruppen zusammenfassen, um die "seltenste" Gruppe zu finden
+            let groupSize = 16;
+            let groups = new Array(16).fill(0);
+            for (let i = 0; i < 256; i++) {
+                groups[Math.floor(i / groupSize)] += hist.data32F[i];
+            }
 
-            // Erste Runde: Valide Flächen sammeln
-            for (let i = 0; i < holeContours.size(); ++i) {
-                let cnt = holeContours.get(i);
-                let area = cv.contourArea(cnt);
-                if (area > 20 && area < (maxArea * 0.05)) { // Keine Riesenflächen
-                    let M = cv.moments(cnt);
-                    let cx = M.m10 / M.m00;
-                    let cy = M.m01 / M.m00;
-                    let dist = Math.hypot(cx - target.x, cy - target.y);
-                    
-                    // Ignoriere das schwarze Zentrum der Scheibe selbst!
-                    // Wenn der Abstand sehr klein ist UND die Fläche groß, ist es der 10er-Ring
-                    if (dist < ringW * 0.5 && area > (ringW * ringW * 0.4)) continue;
-
-                    holeAreas.push({area, dist, cx, cy});
+            // Finde die Gruppe, die am wenigsten Fläche einnimmt (aber nicht 0 ist)
+            let minArea = Infinity;
+            let holeGroupIdx = -1;
+            // Wir ignorieren die hellste Gruppe (Papier) und komplett schwarze Bereiche
+            for (let g = 0; g < 15; g++) { 
+                if (groups[g] > 50 && groups[g] < minArea) {
+                    minArea = groups[g];
+                    holeGroupIdx = g;
                 }
             }
 
-            // Zweite Runde: Multi-Treffer Berechnung
-            if (holeAreas.length > 0) {
-                holeAreas.sort((a,b) => a.area - b.area);
-                let medianArea = holeAreas[Math.floor(holeAreas.length / 2)].area;
+            // 3. SEGMENTIERUNG DER LOCH-PIXEL
+            let holeMask = new cv.Mat();
+            let low = holeGroupIdx * groupSize;
+            let high = low + groupSize;
+            cv.inRange(gray, new cv.Mat(gray.rows, gray.cols, gray.type(), [low]), 
+                             new cv.Mat(gray.rows, gray.cols, gray.type(), [high]), holeMask);
+            
+            // Nur innerhalb der Scheibe suchen
+            cv.bitwise_and(holeMask, mask, holeMask);
 
-                holeAreas.forEach(h => {
-                    let shots = Math.max(1, Math.round(h.area / medianArea));
-                    // Punktlogik: Mitte=10, Außen=10-Ringe+1
-                    let p = 10 - Math.floor(h.dist / ringW);
-                    p = Math.max(10 - numRings + 1, Math.min(10, p));
+            // Konturen der seltenen Farbgruppe finden
+            let holeContours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            cv.findContours(holeMask, holeContours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-                    for(let s=0; s<shots; s++) treffer.push(p);
+            let treffer = [];
+            let numRings = parseInt(document.getElementById('ring-count').value);
+            let ringW = tr / numRings;
+            let validHoles = [];
 
-                    cv.circle(dst, new cv.Point(h.cx, h.cy), 4, [255, 0, 0, 255], -1);
-                    cv.putText(dst, p.toString(), new cv.Point(h.cx+5, h.cy-5), 1, 1.2, [255, 255, 0, 255], 2);
+            for (let i = 0; i < holeContours.size(); ++i) {
+                let cnt = holeContours.get(i);
+                let area = cv.contourArea(cnt);
+                // Mindestgröße für ein Loch, um Rauschen zu vermeiden
+                if (area > 15 && area < (tr * tr * 0.1)) {
+                    let M = cv.moments(cnt);
+                    let cx = M.m10 / M.m00;
+                    let cy = M.m01 / M.m00;
+                    let dist = Math.hypot(cx - tx, cy - ty);
+                    
+                    // Zentrum-Check (10er Ring ignorieren, wenn er die gleiche Farbe wie das Loch hat)
+                    if (dist < ringW * 0.4 && area > (ringW * ringW * 0.4)) continue;
+                    
+                    validHoles.push({area, dist, cx, cy});
+                }
+            }
+
+            // 4. FLÄCHEN-LOGIK (Multi-Schuss-Erkennung)
+            if (validHoles.length > 0) {
+                validHoles.sort((a,b) => a.area - b.area);
+                let avgArea = validHoles[Math.floor(validHoles.length / 2)].area;
+
+                validHoles.forEach(h => {
+                    let shotCount = Math.max(1, Math.round(h.area / avgArea));
+                    let points = 10 - Math.floor(h.dist / ringW);
+                    points = Math.max(10 - numRings + 1, Math.min(10, points));
+
+                    for(let s=0; s<shotCount; s++) treffer.push(points);
+
+                    cv.circle(dst, new cv.Point(h.cx, h.cy), 5, [255, 0, 0, 255], -1);
+                    cv.putText(dst, points.toString(), new cv.Point(h.cx+8, h.cy-8), 1, 1.3, [255, 255, 0, 255], 2);
                 });
             }
 
-            cv.circle(dst, new cv.Point(target.x, target.y), target.r, [0, 255, 0, 255], 2);
+            cv.circle(dst, new cv.Point(tx, ty), tr, [0, 255, 0, 255], 2);
             cv.imshow('output-canvas', dst);
             zeigeErgebnis(treffer);
-            status.innerText = "Fertig";
+            
+            status.innerText = "Auswertung abgeschlossen";
             resetBtn.style.display = "block";
 
-            // Aufräumen
-            src.delete(); dst.delete(); gray.delete(); binary.delete(); mask.delete(); 
-            holeThresh.delete(); maskedHoles.delete(); contours.delete(); 
+            // Cleanup
+            src.delete(); dst.delete(); gray.delete(); blurred.delete(); circles.delete();
+            mask.delete(); hist.delete(); maskVec.delete(); holeMask.delete();
             holeContours.delete(); hierarchy.delete();
         }
 
@@ -191,9 +200,10 @@
             Object.keys(counts).sort((a,b) => b-a).forEach(p => {
                 resultsList.innerHTML += `<div class="result-row"><span>${p}er Ring:</span><span>${counts[p]}x</span></div>`;
             });
-            resultsList.innerHTML += `<div class="result-row total"><span>Gesamt: ${sum}</span></div>`;
+            resultsList.innerHTML += `<div class="result-row total"><span>Gesamt: ${sum} Punkte</span></div>`;
             document.getElementById('result-panel').style.display = 'block';
         }
     </script>
 </body>
 </html>
+
